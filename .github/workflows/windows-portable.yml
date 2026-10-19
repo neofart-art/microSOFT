@@ -1,0 +1,42 @@
+name: Windows portable EXE
+
+on:
+  push:
+    branches: [main, codex/network-folder-audit]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Unit tests
+        run: python -m unittest discover -s NetworkFolderAudit -v
+      - name: Install build tool
+        run: python -m pip install pyinstaller==6.16.0
+      - name: Build standalone EXE
+        run: python -m PyInstaller --clean --noconfirm --onefile --windowed --noupx --name NetworkFolderAudit NetworkFolderAudit/audit.py
+      - name: Test packaged GUI and scanner without Python on PATH
+        run: python NetworkFolderAudit/check_portable.py
+      - name: Include instructions
+        run: Copy-Item NetworkFolderAudit/PORTABLE_RU.txt dist/START_HERE.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: NetworkFolderAudit-Windows-x64
+          path: |
+            dist/NetworkFolderAudit.exe
+            dist/START_HERE.txt
+          if-no-files-found: error
+          retention-days: 90
