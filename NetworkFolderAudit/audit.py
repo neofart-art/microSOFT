@@ -188,7 +188,7 @@ def export_csv(destination, rows, issues, cancelled):
     return log_path
 
 
-def gui():
+def gui(smoke_test=False):
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
     app = tk.Tk()
@@ -317,7 +317,36 @@ def gui():
         app.destroy()
     app.protocol('WM_DELETE_WINDOW', close)
     app.after(150, poll)
+    if smoke_test:
+        app.after(700, app.destroy)
     app.mainloop()
+
+
+def self_test(report_path):
+    """Exercise the bundled GUI, scanner, CSV and Windows ownership API."""
+    import json
+    import tempfile
+    from pathlib import Path
+    try:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'data'
+            (root / 'nested').mkdir(parents=True)
+            (root / 'a.txt').write_bytes(b'abc')
+            (root / 'nested' / 'b.txt').write_bytes(b'12345')
+            rows, issues, cancelled = scan(str(root), owners=True)
+            assert rows[0].size == 8 and rows[0].files == 2
+            assert not issues and not cancelled
+            assert rows[0].folder_owner and not rows[0].folder_owner.startswith(
+                ('Недоступно', 'Имя не определено'))
+            export_csv(str(Path(temporary) / 'report.csv'), rows, issues, cancelled)
+            gui(smoke_test=True)
+            report = {'ok': True, 'bytes': rows[0].size, 'files': rows[0].files,
+                      'owner': rows[0].folder_owner, 'gui': 'opened and closed'}
+        Path(report_path).write_text(json.dumps(report, ensure_ascii=False), encoding='utf-8')
+        return 0
+    except Exception as exc:
+        Path(report_path).write_text(json.dumps({'ok': False, 'error': repr(exc)}), encoding='utf-8')
+        return 1
 
 
 def main():
@@ -325,7 +354,10 @@ def main():
     parser.add_argument('--path', help='UNC-путь, сетевой диск или локальная папка')
     parser.add_argument('--csv', help='Путь отчёта вне проверяемой папки')
     parser.add_argument('--owners', action='store_true', help='Запрашивать владельцев в Windows')
+    parser.add_argument('--self-test', metavar='REPORT_JSON', help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.self_test:
+        return self_test(args.self_test)
     if args.path:
         if not args.csv:
             parser.error('--path требует --csv')
