@@ -7,10 +7,10 @@ import tempfile
 
 
 executable = Path('dist/NetworkFolderAudit.exe').resolve()
-environment = dict(os.environ)
+environment = {key.upper(): value for key, value in os.environ.items()}
 environment.pop('PYTHONHOME', None)
 environment.pop('PYTHONPATH', None)
-environment['PATH'] = str(Path(environment['SystemRoot']) / 'System32')
+environment['PATH'] = str(Path(environment['SYSTEMROOT']) / 'System32')
 with tempfile.TemporaryDirectory() as temporary:
     report = Path(temporary) / 'self_test.json'
     result = subprocess.run([str(executable), '--self-test', str(report)],
