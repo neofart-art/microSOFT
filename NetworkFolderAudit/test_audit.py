@@ -4,12 +4,65 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import audit
 
 
 class AuditTests(unittest.TestCase):
+    def test_age_boundaries_are_disjoint(self):
+        now = datetime(2026, 10, 19, 12, 30)
+        reference = now.timestamp()
+        row = audit.Folder('test')
+        row.access = reference
+        self.assertEqual(audit.age_group(row, reference), audit.AGE_GROUPS[0])
+        boundaries = [now - timedelta(days=7)] + [audit.months_ago(now, m) for m in (1, 3, 6, 9, 12)]
+        for i, boundary in enumerate(boundaries):
+            with self.subTest(boundary=boundary):
+                row.access = boundary.timestamp() + 1
+                self.assertEqual(audit.age_group(row, reference), audit.AGE_GROUPS[i])
+                row.access = boundary.timestamp()
+                self.assertEqual(audit.age_group(row, reference), audit.AGE_GROUPS[i + 1])
+                row.access -= 1
+                self.assertEqual(audit.age_group(row, reference), audit.AGE_GROUPS[i + 1])
+
+    def test_month_end_and_leap_year(self):
+        self.assertEqual(audit.months_ago(datetime(2024, 3, 31), 1), datetime(2024, 2, 29))
+        self.assertEqual(audit.months_ago(datetime(2024, 2, 29), 12), datetime(2023, 2, 28))
+
+    def test_missing_future_and_incomplete_dates(self):
+        reference = datetime(2026, 10, 19).timestamp()
+        row = audit.Folder('test')
+        self.assertEqual(audit.age_group(row, reference), 'Нет даты обращения')
+        row.access = reference + 60
+        self.assertEqual(audit.age_group(row, reference), 'Дата в будущем')
+        row.access = reference - 50_000_000
+        for field in ('errors', 'skipped'):
+            setattr(row, field, 1)
+            self.assertEqual(audit.age_group(row, reference), 'Неполные данные')
+            setattr(row, field, 0)
+        self.assertEqual(audit.age_group(row, reference, cancelled=True), 'Неполные данные')
+
+    def test_filter_and_export_use_same_reference(self):
+        reference = datetime(2026, 10, 19).timestamp()
+        recent = audit.Folder('recent', size=1_000_000_000, access=reference - 60)
+        old = audit.Folder('old', access=datetime(2025, 1, 1).timestamp())
+        rows = [recent, old]
+        self.assertEqual(audit.select_rows(rows, audit.ALL_GROUPS, reference), rows)
+        selected = audit.select_rows(rows, 'От 12 месяцев', reference)
+        self.assertEqual(selected, [old])
+        self.assertEqual(audit.values(recent, False, '', reference)[2], '1.000')
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = str(Path(tmp) / 'filtered.csv')
+            audit.export_csv(destination, selected, [], False, reference)
+            with open(destination, encoding='utf-8-sig', newline='') as f:
+                parsed = list(csv.reader(f, delimiter=';'))
+            self.assertEqual(len(parsed), 2)
+            self.assertEqual(parsed[1][0], 'old')
+            self.assertEqual(parsed[1][-2], 'От 12 месяцев')
+            self.assertEqual(parsed[1][-1], audit.stamp(reference))
+
     def test_nested_sizes_times_and_export(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / 'Данные'

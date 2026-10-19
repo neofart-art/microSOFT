@@ -1,5 +1,6 @@
 """Network Folder Audit — Python 3.10+, standard library only."""
 import argparse
+import calendar
 import csv
 import ctypes
 import os
@@ -8,7 +9,49 @@ import stat
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
+
+
+GB = 1_000_000_000
+ALL_GROUPS = 'Все папки'
+AGE_GROUPS = (
+    'Менее недели', 'От недели до 1 месяца', 'От 1 до 3 месяцев',
+    'От 3 до 6 месяцев', 'От 6 до 9 месяцев', 'От 9 до 12 месяцев',
+    'От 12 месяцев', 'Нет даты обращения', 'Дата в будущем', 'Неполные данные',
+)
+
+
+def months_ago(now, months):
+    """Calendar month boundaries, including month ends and leap years."""
+    year, month = divmod(now.year * 12 + now.month - 1 - months, 12)
+    month += 1
+    return now.replace(year=year, month=month,
+                       day=min(now.day, calendar.monthrange(year, month)[1]))
+
+
+def age_group(row, reference_time, cancelled=False):
+    if cancelled or row.errors or row.skipped:
+        return AGE_GROUPS[9]
+    if row.access is None or row.access <= 0:
+        return AGE_GROUPS[7]
+    try:
+        access = datetime.fromtimestamp(row.access)
+        now = datetime.fromtimestamp(reference_time)
+    except (ValueError, OverflowError, OSError):
+        return AGE_GROUPS[7]
+    if access > now:
+        return AGE_GROUPS[8]
+    if access > now - timedelta(days=7):
+        return AGE_GROUPS[0]
+    for index, months in enumerate((1, 3, 6, 9, 12), start=1):
+        if access > months_ago(now, months):
+            return AGE_GROUPS[index]
+    return AGE_GROUPS[6]
+
+
+def select_rows(rows, group, reference_time, cancelled=False):
+    return [row for row in rows if group == ALL_GROUPS
+            or age_group(row, reference_time, cancelled) == group]
 
 
 def stamp(value):
@@ -151,19 +194,22 @@ def scan(root, cancel=None, progress=None, owners=False):
     return rows, issues, cancelled
 
 
-HEADERS = ['Папка', 'Байт (с вложениями)', 'ГиБ', 'Файлов (с вложениями)',
+HEADERS = ['Папка', 'Байт (с вложениями)', 'ГБ (1 ГБ = 1 000 000 000 байт)', 'Файлов (с вложениями)',
            'Подпапок (с вложениями)', 'Последнее обращение к файлам (по ФС)',
            'Последнее изменение файла', 'Самый недавно изменённый файл',
            'Владелец папки (не автор)', 'Владелец последнего файла (не автор)',
-           'Ошибок в поддереве', 'Пропущено ссылок в поддереве', 'Статус', 'Дата отчёта']
+           'Ошибок в поддереве', 'Пропущено ссылок в поддереве', 'Статус', 'Дата отчёта',
+           'Группа по давности обращения', 'Дата оценки давности']
 
 
-def values(row, cancelled, report_time):
+def values(row, cancelled, report_time, reference_time=None):
+    reference_time = time.time() if reference_time is None else reference_time
     status = 'ПРЕРВАНО: неполный результат' if cancelled else (
         'НЕПОЛНО: ошибки / пропуски' if row.errors or row.skipped else 'Готово')
-    return [row.path, row.size, f'{row.size / 1024**3:.3f}', row.files, row.dirs,
+    return [row.path, row.size, f'{row.size / GB:.3f}', row.files, row.dirs,
             stamp(row.access), stamp(row.modified), row.latest, row.folder_owner,
-            row.latest_owner, row.errors, row.skipped, status, report_time]
+            row.latest_owner, row.errors, row.skipped, status, report_time,
+            age_group(row, reference_time, cancelled), stamp(reference_time)]
 
 
 def safe_cell(value):
@@ -173,13 +219,14 @@ def safe_cell(value):
     return value
 
 
-def export_csv(destination, rows, issues, cancelled):
+def export_csv(destination, rows, issues, cancelled, reference_time=None):
+    reference_time = time.time() if reference_time is None else reference_time
     report_time = stamp(time.time())
     with open(destination, 'w', newline='', encoding='utf-8-sig') as stream:
         writer = csv.writer(stream, delimiter=';')
         writer.writerow(HEADERS)
         for row in sorted(rows, key=lambda r: r.size, reverse=True):
-            writer.writerow([safe_cell(v) for v in values(row, cancelled, report_time)])
+            writer.writerow([safe_cell(v) for v in values(row, cancelled, report_time, reference_time)])
     log_path = os.path.splitext(destination)[0] + '_issues.csv'
     with open(log_path, 'w', newline='', encoding='utf-8-sig') as stream:
         writer = csv.writer(stream, delimiter=';')
@@ -188,11 +235,11 @@ def export_csv(destination, rows, issues, cancelled):
     return log_path
 
 
-def gui(smoke_test=False):
+def gui(smoke_test=False, smoke_rows=None):
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
     app = tk.Tk()
-    app.title('Анализ сетевых папок • версия 1.0')
+    app.title('Анализ сетевых папок • версия 1.1')
     app.geometry('1250x720')
     app.minsize(850, 480)
     frame = ttk.Frame(app, padding=12)
@@ -211,6 +258,9 @@ def gui(smoke_test=False):
     actions.pack(fill='x', pady=5)
     events, cancellation = queue.Queue(), threading.Event()
     result = [None]
+    reference_time = [None]
+    selected_group = tk.StringVar(value=ALL_GROUPS)
+    group_summary = tk.StringVar()
     running = [False]
     buttons = {}
     def start():
@@ -220,6 +270,9 @@ def gui(smoke_test=False):
             return
         cancellation.clear()
         result[0] = None
+        selected_group.set(ALL_GROUPS)
+        group_summary.set('')
+        group_picker['state'] = 'disabled'
         tree.delete(*tree.get_children())
         running[0] = True
         buttons['start']['state'] = 'disabled'
@@ -240,8 +293,10 @@ def gui(smoke_test=False):
             return
         try:
             rows, issues, cancelled = result[0]
-            log = export_csv(destination, rows, issues, cancelled)
-            messagebox.showinfo('Сохранено', f'Отчёт: {destination}\nОшибки и пропуски: {log}')
+            selected = select_rows(rows, selected_group.get(), reference_time[0], cancelled)
+            log = export_csv(destination, selected, issues, cancelled, reference_time[0])
+            messagebox.showinfo('Сохранено', f'Группа: {selected_group.get()}\nПапок: {len(selected)}\n'
+                                f'Отчёт: {destination}\nЖурнал всего сканирования: {log}')
         except OSError as exc:
             messagebox.showerror('Ошибка сохранения', str(exc))
     for key, label, callback in [('start', 'Сканировать', start),
@@ -250,11 +305,19 @@ def gui(smoke_test=False):
         buttons[key] = ttk.Button(actions, text=label, command=callback)
         buttons[key].pack(side='left', padx=(0, 8))
     buttons['stop']['state'] = buttons['export']['state'] = 'disabled'
+    filters = ttk.Frame(frame)
+    filters.pack(fill='x', pady=(4, 6))
+    ttk.Label(filters, text='Последнее обращение:').pack(side='left', padx=(0, 8))
+    group_picker = ttk.Combobox(filters, textvariable=selected_group,
+                               values=(ALL_GROUPS,) + AGE_GROUPS, state='disabled', width=32)
+    group_picker.pack(side='left')
+    ttk.Label(filters, text='CSV сохраняет выбранную группу. 1 ГБ = 1 млрд байт.').pack(side='left', padx=12)
+    ttk.Label(frame, textvariable=group_summary).pack(anchor='w', pady=(0, 5))
     table = ttk.Frame(frame)
     table.pack(fill='both', expand=True)
-    columns = ('path', 'size', 'files', 'access', 'modified', 'owner', 'latest_owner', 'errors')
+    columns = ('path', 'size', 'files', 'group', 'access', 'modified', 'owner', 'latest_owner', 'errors')
     tree = ttk.Treeview(table, columns=columns, show='headings')
-    labels = ['Папка', 'ГиБ', 'Файлов', 'Обращение (ФС)', 'Изменение файла', 'Владелец папки', 'Владелец последнего файла', 'Ошибки / пропуски']
+    labels = ['Папка', 'ГБ', 'Файлов', 'Давность обращения', 'Обращение (ФС)', 'Изменение файла', 'Владелец папки', 'Владелец последнего файла', 'Ошибки / пропуски']
     sorting = {}
     def sort(column):
         reverse = not sorting.get(column, False)
@@ -280,6 +343,23 @@ def gui(smoke_test=False):
     table.columnconfigure(0, weight=1)
     ttk.Label(frame, textvariable=status, wraplength=1150).pack(anchor='w', pady=(8, 0))
     ttk.Label(frame, text='Сканирование читает метаданные. Сохраняйте отчёт вне проверяемой папки.').pack(anchor='w')
+    def render_rows():
+        tree.delete(*tree.get_children())
+        if result[0] is None:
+            return
+        rows, issues, cancelled = result[0]
+        group = selected_group.get()
+        ordered = sorted(((i, row) for i, row in enumerate(rows) if group == ALL_GROUPS
+                          or age_group(row, reference_time[0], cancelled) == group),
+                         key=lambda pair: pair[1].size, reverse=True)
+        for i, row in ordered[:10000]:
+            tree.insert('', 'end', iid=str(i), values=(row.path, f'{row.size / GB:.3f}', row.files,
+                        age_group(row, reference_time[0], cancelled), stamp(row.access),
+                        stamp(row.modified), row.folder_owner, row.latest_owner, row.errors + row.skipped))
+        group_summary.set(f'{group}: {len(ordered):,} папок. '
+                          + ('В окне первые 10 000, в CSV — вся группа. ' if len(ordered) > 10000 else '')
+                          + 'Размер родителя уже включает вложенные папки.')
+    group_picker.bind('<<ComboboxSelected>>', lambda event: render_rows())
     def poll():
         try:
             while True:
@@ -295,17 +375,14 @@ def gui(smoke_test=False):
                     messagebox.showerror('Ошибка', payload)
                     continue
                 result[0] = payload
+                reference_time[0] = time.time()
                 rows, issues, cancelled = payload
-                # Large reports are complete in CSV; cap UI rendering for responsiveness.
-                ordered = sorted(enumerate(rows), key=lambda pair: pair[1].size, reverse=True)
-                for i, row in ordered[:10000]:
-                    tree.insert('', 'end', iid=str(i), values=(row.path, f'{row.size / 1024**3:.3f}', row.files,
-                                stamp(row.access), stamp(row.modified), row.folder_owner, row.latest_owner,
-                                row.errors + row.skipped))
+                group_picker['state'] = 'readonly'
+                render_rows()
                 buttons['export']['state'] = 'normal'
                 summary = 'ОСТАНОВЛЕНО, результат неполный' if cancelled else 'Завершено'
                 status.set(f'{summary}. Папок: {len(rows):,}; файлов: {rows[0].files:,}; '
-                           f'объём: {rows[0].size / 1024**3:.3f} ГиБ; ошибок / пропусков: {len(issues):,}. '
+                           f'объём: {rows[0].size / GB:.3f} ГБ; ошибок / пропусков: {len(issues):,}. '
                            + ('В окне первые 10 000 папок, все — в CSV.' if len(rows) > 10000 else ''))
         except queue.Empty:
             pass
@@ -317,9 +394,29 @@ def gui(smoke_test=False):
         app.destroy()
     app.protocol('WM_DELETE_WINDOW', close)
     app.after(150, poll)
+    smoke_errors = []
     if smoke_test:
-        app.after(700, app.destroy)
+        def exercise_filters():
+            try:
+                result[0] = (smoke_rows, [], False)
+                reference_time[0] = time.time()
+                group_picker['state'] = 'readonly'
+                render_rows()
+                assert len(tree.get_children()) == len(smoke_rows)
+                selected_group.set(AGE_GROUPS[0])
+                render_rows()
+                assert len(tree.get_children()) == len(smoke_rows)
+                selected_group.set(AGE_GROUPS[6])
+                render_rows()
+                assert not tree.get_children()
+            except Exception as exc:
+                smoke_errors.append(exc)
+            finally:
+                app.after(200, app.destroy)
+        app.after(500, exercise_filters)
     app.mainloop()
+    if smoke_errors:
+        raise smoke_errors[0]
 
 
 def self_test(report_path):
@@ -339,9 +436,9 @@ def self_test(report_path):
             assert rows[0].folder_owner and not rows[0].folder_owner.startswith(
                 ('Недоступно', 'Имя не определено'))
             export_csv(str(Path(temporary) / 'report.csv'), rows, issues, cancelled)
-            gui(smoke_test=True)
+            gui(smoke_test=True, smoke_rows=rows)
             report = {'ok': True, 'bytes': rows[0].size, 'files': rows[0].files,
-                      'owner': rows[0].folder_owner, 'gui': 'opened and closed'}
+                      'owner': rows[0].folder_owner, 'gui': 'opened, age filters checked, closed'}
         Path(report_path).write_text(json.dumps(report, ensure_ascii=False), encoding='utf-8')
         return 0
     except Exception as exc:
