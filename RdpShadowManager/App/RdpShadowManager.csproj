@@ -6,4 +6,5 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../Core/Core.csproj" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Maintenance/RemoteMaintenance.ps1" /></ItemGroup>
 </Project>

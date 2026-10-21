@@ -6,7 +6,7 @@ using System.Security.Principal;
 using RdpShadowManager.Core;
 
 namespace RdpShadowManager;
-internal sealed class MainForm : Form
+internal sealed partial class MainForm : Form
 {
     private readonly TextBox host = new() { Width = 280, MaxLength = 253 };
     private readonly Button refresh = new() { Text = "Получить сеансы", AutoSize = true };
@@ -23,15 +23,17 @@ internal sealed class MainForm : Form
     private Task? operation;
     private bool closing;
     private bool busy;
+    private bool isElevated;
+    private readonly Button elevate = new() { Text = "Перезапустить от имени администратора", AutoSize = true };
     private int revision;
     private Session? Selected => grid.CurrentRow?.DataBoundItem as Session;
     public MainForm(StartupState? restored = null)
     {
         Text = "RDP Shadow Manager"; AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new(900, 720); MinimumSize = new(760, 600);
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8, Padding = new(12) };
+        ClientSize = new(950, 840); MinimumSize = new(780, 700);
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Padding = new(12) };
         layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.Percent, 100));
-        for (int i=2;i<8;i++) layout.RowStyles.Add(new(SizeType.AutoSize));
+        for (int i=2;i<9;i++) layout.RowStyles.Add(new(SizeType.AutoSize));
         Controls.Add(layout);
         FlowLayoutPanel Row(params Control[] controls)
         {
@@ -45,24 +47,29 @@ internal sealed class MainForm : Form
         layout.Controls.Add(grid,0,1); layout.Controls.Add(Row(consent, noConsent),0,2);
         using var identity = WindowsIdentity.GetCurrent();
         bool elevated = new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
-        var elevate = new Button { Text = "Перезапустить от имени администратора", AutoSize = true, Enabled = !elevated };
+        isElevated = elevated; elevate.Enabled = !elevated;
         var administration = new GroupBox { Text = "Администрирование", AutoSize = true, Dock = DockStyle.Fill, Padding = new(8), Margin = new(3, 12, 3, 8) };
         administration.Controls.Add(Row(new Label { Text = elevated ? "Программа запущена от имени администратора" : "Программа запущена с обычными правами", AutoSize = true, Margin = new(3,8,12,3) }, elevate));
         layout.Controls.Add(Row(connect, progress),0,3);
-        layout.Controls.Add(administration,0,4); layout.Controls.Add(status,0,5);
+        layout.Controls.Add(administration,0,4);
+        var maintenance = new GroupBox { Text = "Обслуживание", AutoSize = true, Dock = DockStyle.Fill, Padding = new(8) };
+        maintenance.Controls.Add(Row(repair, target));
+        layout.Controls.Add(maintenance,0,5); layout.Controls.Add(status,0,6);
         var toggle = new CheckBox { Text = "Диагностика", AutoSize = true };
-        layout.Controls.Add(toggle,0,6);
+        layout.Controls.Add(toggle,0,7);
         diagnostics.Height = 150;
         var copy = new Button { Text = "Копировать", AutoSize = true, Dock = DockStyle.Bottom };
-        diagnostics.Controls.Add(log); diagnostics.Controls.Add(copy); layout.Controls.Add(diagnostics,0,7);
-        toggle.CheckedChanged += (_,_) => { diagnostics.Visible = toggle.Checked; layout.RowStyles[7].SizeType = SizeType.Absolute; layout.RowStyles[7].Height = toggle.Checked ? 150 : 0; };
+        diagnostics.Controls.Add(log); diagnostics.Controls.Add(copy); layout.Controls.Add(diagnostics,0,8);
+        toggle.CheckedChanged += (_,_) => { diagnostics.Visible = toggle.Checked; layout.RowStyles[8].SizeType = SizeType.Absolute; layout.RowStyles[8].Height = toggle.Checked ? 150 : 0; };
         copy.Click += (_,_) => { try { if (log.TextLength > 0) Clipboard.SetText(log.Text); } catch (Exception ex) { Failure("Копирование", host.Text, ex); } };
         host.TextChanged += (_,_) => { revision++; request?.Cancel(); grid.DataSource = null; UpdateConnect(); status.Text = "Компьютер изменён. Получите сеансы заново."; };
         grid.SelectionChanged += (_,_) => UpdateConnect();
         refresh.Click += async (_,_) => await Run(false);
         connect.Click += async (_,_) => await Run(true);
+        repair.Click += async (_,_) => await Service();
         elevate.Click += (_,_) =>
         {
+            if (servicing) return;
             try
             {
                 var saved = new StartupState(host.Text, noConsent.Checked);
@@ -79,6 +86,7 @@ internal sealed class MainForm : Form
         };
         FormClosing += (_,e) =>
         {
+            if (servicing) { e.Cancel = true; status.Text = "Дождитесь завершения обслуживания и отчёта."; return; }
             if (operation is { IsCompleted: false })
             {
                 e.Cancel = true;
@@ -98,6 +106,8 @@ internal sealed class MainForm : Form
     private void UpdateConnect()
     {
         connect.Enabled = !busy && Selected?.CanConnect == true;
+        repair.Enabled = !busy && !serviceUncertain && Selected?.CanConnect == true;
+        target.Text = Selected is {} selected ? $"Компьютер: {host.Text}   Пользователь: {selected.Domain}\\{selected.User}   ID сеанса: {selected.Id}\nSID будет проверен через WinRM перед подтверждением." : "Цель: выберите активный сеанс.";
         if (!busy && Selected is { CanConnect: false }) status.Text = "Этот сеанс не активен: подключение недоступно. Обновите список.";
     }
     private void Trace(string operationName, string computer, string detail, int code = 0) =>
