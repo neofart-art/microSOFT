@@ -1,0 +1,45 @@
+name: RDP Shadow Manager Windows x64
+on:
+  push:
+    branches: [main, codex/rdp-shadow-manager]
+    paths: ['RdpShadowManager/**', '.github/workflows/rdp-shadow-manager.yml']
+  pull_request:
+    paths: ['RdpShadowManager/**', '.github/workflows/rdp-shadow-manager.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  portable:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test and publish self-contained portable x64
+        shell: pwsh
+        run: ./RdpShadowManager/build-portable.ps1
+      - name: Smoke test packaged WTS worker
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path './RdpShadowManager/artifacts/RdpShadowManager-win-x64/RdpShadowManager.exe').Path
+          $p = [Diagnostics.Process]::new()
+          $p.StartInfo = [Diagnostics.ProcessStartInfo]::new($exe)
+          $p.StartInfo.UseShellExecute = $false
+          $p.StartInfo.RedirectStandardOutput = $true
+          $p.StartInfo.ArgumentList.Add('--query')
+          $p.StartInfo.ArgumentList.Add('localhost')
+          $null = $p.Start()
+          $output = $p.StandardOutput.ReadToEndAsync()
+          if (-not $p.WaitForExit(20000)) { $p.Kill($true); throw 'Worker timed out' }
+          if ($p.ExitCode -ne 0) { throw "Worker exit: $($p.ExitCode)" }
+          $result = $output.GetAwaiter().GetResult() | ConvertFrom-Json
+          if ($null -eq $result -or $result.ErrorCode -ne 0) { throw "WTS query failed: $($result.Error)" }
+          Write-Host "WTS worker smoke test passed; sessions: $($result.Sessions.Count)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RdpShadowManager-win-x64
+          path: RdpShadowManager/artifacts/RdpShadowManager-win-x64.zip
+          if-no-files-found: error
+          retention-days: 30
