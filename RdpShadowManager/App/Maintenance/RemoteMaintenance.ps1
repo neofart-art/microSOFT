@@ -210,7 +210,7 @@ public static class RsmNative {
             $tmp="$path.tmp"
             $stream=[IO.FileStream]::new($tmp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
             try { $bytes=[Text.Encoding]::UTF8.GetBytes($json); $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
-            if (Test-Path -LiteralPath $path) { [IO.File]::Replace($tmp,$path,$null) } else { [IO.File]::Move($tmp,$path) }
+            if (Test-Path -LiteralPath $path) { [IO.File]::Replace($tmp,$path,"$path.previous"); [IO.File]::Delete("$path.previous") } else { [IO.File]::Move($tmp,$path) }
         }
         $desired=@{ Exists=$true; Kind='DWord'; Data='1' }
         if ($r.Action -eq 'Apply') {

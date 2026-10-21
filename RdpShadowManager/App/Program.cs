@@ -22,6 +22,11 @@ internal static class Program
             return 0;
         }
         ApplicationConfiguration.Initialize();
+        if (args.Length == 2 && args[0] == "--ui-smoke")
+        {
+            try { UiSmoke.Run(args[1]); return 0; }
+            catch (Exception ex) { File.WriteAllText(Path.Combine(args[1], "failure.txt"), ex.ToString()); return 1; }
+        }
         StartupState? restored = null;
         if (args.Length != 0)
         {

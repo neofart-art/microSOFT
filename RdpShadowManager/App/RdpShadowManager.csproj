@@ -3,8 +3,9 @@
     <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms><EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <ApplicationIcon>Resources/app.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../Core/Core.csproj" /></ItemGroup>
-  <ItemGroup><EmbeddedResource Include="Maintenance/RemoteMaintenance.ps1" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Maintenance/RemoteMaintenance.ps1" /><EmbeddedResource Include="Resources/outlook-mascot.jpg" /><EmbeddedResource Include="Resources/app.ico" /></ItemGroup>
 </Project>

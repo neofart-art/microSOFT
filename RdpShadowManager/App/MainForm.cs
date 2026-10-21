@@ -29,12 +29,24 @@ internal sealed partial class MainForm : Form
     private Session? Selected => grid.CurrentRow?.DataBoundItem as Session;
     public MainForm(StartupState? restored = null)
     {
-        Text = "RDP Shadow Manager"; AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new(950, 840); MinimumSize = new(780, 700);
+        Text = "RDP Shadow Manager"; AutoScaleMode = AutoScaleMode.Dpi; AutoScaleDimensions = new(96, 96);
+        using (var iconStream = typeof(MainForm).Assembly.GetManifestResourceStream("RdpShadowManager.Resources.app.ico")!)
+            Icon = new Icon(iconStream, 256, 256);
+        ShowIcon = true; ShowInTaskbar = true;
+        ClientSize = new(1174, 840); MinimumSize = new(1004, 700);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Padding = new(12) };
         layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.Percent, 100));
         for (int i=2;i<9;i++) layout.RowStyles.Add(new(SizeType.AutoSize));
-        Controls.Add(layout);
+        var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
+        shell.ColumnStyles.Add(new(SizeType.Percent, 100)); shell.ColumnStyles.Add(new(SizeType.Absolute, 224));
+        shell.RowStyles.Add(new(SizeType.Percent, 100));
+        Controls.Add(shell); shell.Controls.Add(layout, 0, 0);
+        var art = new Panel { Dock = DockStyle.Fill, Padding = new(12) };
+        using var imageStream = typeof(MainForm).Assembly.GetManifestResourceStream("RdpShadowManager.Resources.outlook-mascot.jpg")!;
+        using var sourceImage = Image.FromStream(imageStream);
+        var mascot = new PictureBox { Image = new Bitmap(sourceImage), SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.Top, Height = (int)Math.Round(200.0 * sourceImage.Height / sourceImage.Width), AccessibleName = "Персонаж Outlook", TabStop = false };
+        art.Controls.Add(mascot); shell.Controls.Add(art, 1, 0);
+        FormClosed += (_,_) => { mascot.Image?.Dispose(); Icon?.Dispose(); };
         FlowLayoutPanel Row(params Control[] controls)
         {
             var row = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };

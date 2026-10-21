@@ -78,5 +78,6 @@ try {
     [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($scratch,$false)
     Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath "$temp.tmp" -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath "$temp.previous" -Force -ErrorAction SilentlyContinue
 }
 Write-Host "PASS: $count maintenance checks"

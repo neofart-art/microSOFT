@@ -37,6 +37,31 @@ jobs:
           $result = $output.GetAwaiter().GetResult() | ConvertFrom-Json
           if ($null -eq $result -or $result.ErrorCode -ne 0) { throw "WTS query failed: $($result.Error)" }
           Write-Host "WTS worker smoke test passed; sessions: $($result.Sessions.Count)"
+      - name: Published UI resources and layout simulations 100-200 percent
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path './RdpShadowManager/artifacts/RdpShadowManager-win-x64/RdpShadowManager.exe').Path
+          $folder = Join-Path $env:RUNNER_TEMP 'rdp-ui-smoke'
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          $p = [Diagnostics.Process]::new()
+          $p.StartInfo = [Diagnostics.ProcessStartInfo]::new($exe)
+          $p.StartInfo.UseShellExecute = $false
+          $p.StartInfo.ArgumentList.Add('--ui-smoke')
+          $p.StartInfo.ArgumentList.Add($folder)
+          $null = $p.Start()
+          if (-not $p.WaitForExit(60000)) { $p.Kill($true); throw 'UI smoke timed out' }
+          if ($p.ExitCode -ne 0) {
+            if (Test-Path "$folder/failure.txt") { Get-Content "$folder/failure.txt" }
+            throw "UI smoke exit: $($p.ExitCode)"
+          }
+          Get-Content "$folder/checks.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: RdpShadowManager-layout-checks
+          path: ${{ runner.temp }}/rdp-ui-smoke
+          if-no-files-found: ignore
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
           name: RdpShadowManager-win-x64
