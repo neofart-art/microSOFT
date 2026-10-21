@@ -46,6 +46,14 @@ internal static class UiSmoke
         using var executableIcon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!);
         if (executableIcon == null) throw new InvalidOperationException("EXE icon missing");
         checks.Add("PASS: EXE icon and embedded graphics load from published executable");
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        var account = identity.Name.Split('\\', 2);
+        var request = new MaintenanceRequest("Inspect", "localhost", MaintenanceClient.LocalMachineId(),
+            Math.Max(1, System.Diagnostics.Process.GetCurrentProcess().SessionId), account.Last(), account.Length == 2 ? account[0] : Environment.MachineName);
+        var transport = Task.Run(() => MaintenanceClient.Run(request)).GetAwaiter().GetResult();
+        if (transport.ExitCode == 0) throw new InvalidOperationException("Local maintenance target was not rejected");
+        File.WriteAllText(Path.Combine(output, "local-target-rejected.json"), transport.Result.Report());
+        checks.Add("PASS: PowerShell transport returns structured nonzero result for local target / unavailable WinRM; no local fallback");
         File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
     }
     private static IEnumerable<Control> Descendants(Control parent)

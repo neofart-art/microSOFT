@@ -49,7 +49,7 @@ jobs:
           $p.StartInfo.ArgumentList.Add('--ui-smoke')
           $p.StartInfo.ArgumentList.Add($folder)
           $null = $p.Start()
-          if (-not $p.WaitForExit(60000)) { $p.Kill($true); throw 'UI smoke timed out' }
+          if (-not $p.WaitForExit(180000)) { $p.Kill($true); throw 'UI smoke timed out' }
           if ($p.ExitCode -ne 0) {
             if (Test-Path "$folder/failure.txt") { Get-Content "$folder/failure.txt" }
             throw "UI smoke exit: $($p.ExitCode)"
