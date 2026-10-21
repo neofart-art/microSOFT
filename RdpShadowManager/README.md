@@ -2,6 +2,17 @@
 
 Небольшая portable-утилита на C# / WinForms и .NET 10 LTS для Windows 10 (22H2) / 11 x64. Использует Windows WTS API и штатный mstsc.exe. Установщик, Python и отдельно установленный .NET не нужны. Другие файлы репозитория не изменяются.
 
+## Репозиторий разработки
+
+Основной репозиторий разработки: [GitHub — microSOFT](https://github.com/neofart-art/microSOFT). Рабочая ветка: `codex/rdp-shadow-manager`, каталог приложения: `RdpShadowManager`.
+
+```text
+git clone --branch codex/rdp-shadow-manager https://github.com/neofart-art/microSOFT.git
+cd microSOFT
+```
+
+Для разработки fetch/push и Pull Request выполняются в GitHub (`origin`), portable-сборка поддерживается через GitHub Actions. Внутренний `http://git.fors.technology/techadmin/MiniSoft.git` сохранён как remote `fors` только для копии: пользователь обновляет её самостоятельно со своего Windows-ПК. Среда разработки не обращается к `fors` и не отправляет туда изменения. Подробности и команды ручного обновления: [MIGRATION.md](MIGRATION.md).
+
 ## Скачать и запустить
 
 Откройте вкладку **Actions** репозитория → **RDP Shadow Manager Windows x64** → успешный запуск для нужного коммита → **Artifacts** → **RdpShadowManager-win-x64**. Для скачивания артефактов нужен вход в GitHub. Срок хранения — 30 дней; при истечении запустите workflow заново через Run workflow (после появления workflow в основной ветке) либо выполните локальную сборку.
