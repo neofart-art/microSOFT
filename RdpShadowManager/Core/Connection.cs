@@ -14,7 +14,7 @@ public static class Connection
     public static string ValidateHost(string value)
     {
         var host = value.Trim();
-        if (host.Length is 0 or > 253 || host.Any(char.IsWhiteSpace) ||
+        if (host.Length is 0 or > 253 || host.Any(char.IsWhiteSpace) || host.Contains('[') || host.Contains(']') ||
             !(IPAddress.TryParse(host, out _) || Regex.IsMatch(host, @"\A[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?\z")) ||
             host.Contains(".."))
             throw new ArgumentException("Введите имя компьютера или IP без пробелов, путей и ключей командной строки.");
