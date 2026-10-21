@@ -30,4 +30,5 @@ Check(StartupState.Decode(arbitraryState.Encode()) == arbitraryState, "state pre
 Reject(() => StartupState.Decode("bad!"));
 Reject(() => StartupState.Decode(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("null"))));
 Reject(() => StartupState.Decode(new string('A', 16385)));
+passed += PowerTests.Run();
 Console.WriteLine($"PASS: {passed} checks");

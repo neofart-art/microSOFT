@@ -41,11 +41,13 @@ internal sealed partial class MainForm : Form
         shell.ColumnStyles.Add(new(SizeType.Percent, 100)); shell.ColumnStyles.Add(new(SizeType.Absolute, 224));
         shell.RowStyles.Add(new(SizeType.Percent, 100));
         Controls.Add(shell); shell.Controls.Add(layout, 0, 0);
-        var art = new Panel { Dock = DockStyle.Fill, Padding = new(12), Margin = Padding.Empty };
+        var art = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new(12), Margin = Padding.Empty };
+        art.ColumnStyles.Add(new(SizeType.Percent, 100));
+        art.RowStyles.Add(new(SizeType.Absolute, 160)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.Percent, 100));
         using var imageStream = typeof(MainForm).Assembly.GetManifestResourceStream("RdpShadowManager.Resources.outlook-mascot.jpg")!;
         using var sourceImage = Image.FromStream(imageStream);
-        var mascot = new PictureBox { Image = new Bitmap(sourceImage), SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.Top, Height = (int)Math.Round(200.0 * sourceImage.Height / sourceImage.Width), AccessibleName = "Персонаж Outlook", TabStop = false };
-        art.Controls.Add(mascot); shell.Controls.Add(art, 1, 0);
+        var mascot = new PictureBox { Image = new Bitmap(sourceImage), SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.Fill, Margin = Padding.Empty, AccessibleName = "Персонаж Outlook", TabStop = false };
+        art.Controls.Add(mascot, 0, 0); art.Controls.Add(BuildPowerGroup(), 0, 1); shell.Controls.Add(art, 1, 0);
         FormClosed += (_,_) => { mascot.Image?.Dispose(); Icon?.Dispose(); };
         FlowLayoutPanel Row(params Control[] controls)
         {
@@ -75,13 +77,17 @@ internal sealed partial class MainForm : Form
         toggle.CheckedChanged += (_,_) => { diagnostics.Visible = toggle.Checked; layout.RowStyles[8].SizeType = SizeType.Absolute; layout.RowStyles[8].Height = toggle.Checked ? 150 : 0; };
         copy.Click += (_,_) => { try { if (log.TextLength > 0) Clipboard.SetText(log.Text); } catch (Exception ex) { Failure("Копирование", host.Text, ex); } };
         host.TextChanged += (_,_) => { revision++; request?.Cancel(); grid.DataSource = null; UpdateConnect(); status.Text = "Компьютер изменён. Получите сеансы заново."; };
-        grid.SelectionChanged += (_,_) => UpdateConnect();
+        grid.SelectionChanged += (_,_) =>
+        {
+            UpdateConnect();
+            if (!busy && Selected is { CanConnect: false }) status.Text = "Этот сеанс не активен: подключение недоступно. Обновите список.";
+        };
         refresh.Click += async (_,_) => await Run(false);
         connect.Click += async (_,_) => await Run(true);
         repair.Click += async (_,_) => await Service();
         elevate.Click += (_,_) =>
         {
-            if (servicing) return;
+            if (servicing || powering) return;
             try
             {
                 var saved = new StartupState(host.Text, noConsent.Checked);
@@ -98,6 +104,7 @@ internal sealed partial class MainForm : Form
         };
         FormClosing += (_,e) =>
         {
+            if (powering) { e.Cancel = true; status.Text = "Дождитесь ответа на запрос питания."; return; }
             if (servicing) { e.Cancel = true; status.Text = "Дождитесь завершения обслуживания и отчёта."; return; }
             if (operation is { IsCompleted: false })
             {
@@ -117,10 +124,10 @@ internal sealed partial class MainForm : Form
     private async Task CloseAfterOperation() { try { await operation!; } finally { Close(); } }
     private void UpdateConnect()
     {
+        UpdatePowerButtons();
         connect.Enabled = !busy && Selected?.CanConnect == true;
         repair.Enabled = !busy && !serviceUncertain && Selected?.CanConnect == true;
         target.Text = Selected is {} selected ? $"Компьютер: {host.Text}   Пользователь: {selected.Domain}\\{selected.User}   ID сеанса: {selected.Id}\nSID будет проверен через WinRM перед подтверждением." : "Цель: выберите активный сеанс.";
-        if (!busy && Selected is { CanConnect: false }) status.Text = "Этот сеанс не активен: подключение недоступно. Обновите список.";
     }
     private void Trace(string operationName, string computer, string detail, int code = 0) =>
         log.AppendText($"{DateTimeOffset.Now:O} | {operationName} | {computer} | код={code} | {detail}{Environment.NewLine}");
@@ -147,7 +154,7 @@ internal sealed partial class MainForm : Form
         if (launch && selected?.CanConnect != true) return;
         var noPrompt = noConsent.Checked;
         int version = revision;
-        request = new(); busy = true; refresh.Enabled = false; connect.Enabled = false; progress.Visible = true;
+        request = new(); busy = true; refresh.Enabled = false; connect.Enabled = false; progress.Visible = true; UpdateConnect();
         status.Text = launch ? "Проверка выбранного сеанса…" : "Получение сеансов…";
         var current = Execute(); operation = current;
         try { await current; }

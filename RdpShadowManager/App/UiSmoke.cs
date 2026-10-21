@@ -43,6 +43,8 @@ internal static class UiSmoke
             checks.Add($"PASS: layout simulation {scale * 100:0}% | grid {grid.Width}x{grid.Height} | mascot {picture.Width}x{picture.Height}");
             form.Close();
         }
+        PowerSmoke.Run(output);
+        checks.Add("PASS: power worker local-target protection and confirmation defaults (no real power API calls)");
         using var executableIcon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!);
         if (executableIcon == null) throw new InvalidOperationException("EXE icon missing");
         checks.Add("PASS: EXE icon and embedded graphics load from published executable");

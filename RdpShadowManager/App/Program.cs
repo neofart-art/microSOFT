@@ -10,6 +10,21 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--power-worker")
+        {
+            PowerResult result;
+            try
+            {
+                var json = Console.ReadLine() ?? throw new ArgumentException("Пустой запрос питания.");
+                if (json.Length > 8192) throw new ArgumentException("Слишком длинный запрос питания.");
+                var command = JsonSerializer.Deserialize<PowerWorkerRequest>(json) ?? throw new ArgumentException("Пустой запрос питания.");
+                result = PowerClient.Worker(command);
+            }
+            catch (Exception ex) { result = new(ex is Win32Exception w ? w.NativeErrorCode : 87, ex.Message); }
+            using var output = Console.OpenStandardOutput();
+            output.Write(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(result)));
+            return result.Code == 0 ? 0 : 1;
+        }
         // The same portable executable doubles as a killable WTS worker.
         if (args.Length == 2 && args[0] == "--query")
         {
