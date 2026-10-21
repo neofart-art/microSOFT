@@ -11,17 +11,23 @@ internal static class UiSmoke
         foreach (float scale in new[] { 1f, 1.25f, 1.5f, 2f })
         {
             using var form = new MainForm();
+            form.MaximumSize = new(10000, 10000);
             form.Show(); Application.DoEvents();
             var grid = Descendants(form).OfType<DataGridView>().Single();
             var picture = Descendants(form).OfType<PictureBox>().Single();
             var baseline = grid.Size;
-            if (scale != 1f) form.Scale(new SizeF(scale, scale));
+            var baselineClient = form.ClientSize;
+            if (scale != 1f)
+            {
+                form.Scale(new SizeF(scale, scale));
+                form.ClientSize = new((int)Math.Round(baselineClient.Width * scale), (int)Math.Round(baselineClient.Height * scale));
+            }
             form.PerformLayout(); Application.DoEvents();
             void Check(bool value, string message) { if (!value) throw new InvalidOperationException($"{scale * 100}%: {message}"); }
             Check(form.Icon != null && form.ShowInTaskbar && form.ShowIcon, "Window/taskbar icon missing");
             Check(picture.Image is { Width: 1402, Height: 1122 }, "Full embedded image missing");
             Check(picture.SizeMode == PictureBoxSizeMode.Zoom, "Image aspect ratio not preserved");
-            Check(grid.Width >= baseline.Width * scale * 0.94 && grid.Height >= baseline.Height * scale * 0.94, "Table shrank during scaling");
+            Check(grid.Width >= baseline.Width * scale * 0.94 && grid.Height >= baseline.Height * scale * 0.94, $"Table shrank: baseline {baseline}, scaled {grid.Size}, client {form.ClientSize}");
             var artBounds = form.RectangleToClient(picture.RectangleToScreen(picture.ClientRectangle));
             var gridBounds = form.RectangleToClient(grid.RectangleToScreen(grid.ClientRectangle));
             Check(!artBounds.IntersectsWith(gridBounds), "Mascot overlaps the table");

@@ -41,6 +41,7 @@ internal sealed class MaintenanceDialog : Form
             if (checking) return;
             if (CloseOutlook && MessageBox.Show(this, "Outlook будет принудительно завершён только в выбранном сеансе выбранного пользователя. Несохранённые данные могут быть потеряны. Продолжить?", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             checking = true; execute.Enabled = false; cancel.Enabled = false;
+            apply.Enabled = restore.Enabled = versions.Enabled = backups.Enabled = closeOutlook.Enabled = false;
             try
             {
                 if (IsRestore)
@@ -51,7 +52,7 @@ internal sealed class MaintenanceDialog : Form
                 DialogResult = DialogResult.OK; Close();
             }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); }
-            finally { checking = false; if (!IsDisposed) { cancel.Enabled = true; UpdateMode(); } }
+            finally { checking = false; if (!IsDisposed) { cancel.Enabled = true; apply.Enabled = restore.Enabled = closeOutlook.Enabled = true; UpdateMode(); } }
         };
         FormClosing += (_, e) => { if (checking && DialogResult != DialogResult.OK) e.Cancel = true; };
         UpdateMode();
