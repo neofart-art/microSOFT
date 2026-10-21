@@ -22,7 +22,22 @@ internal static class Program
             return 0;
         }
         ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm());
+        StartupState? restored = null;
+        if (args.Length != 0)
+        {
+            try
+            {
+                if (args.Length != 2 || args[0] != "--resume-state")
+                    throw new ArgumentException("Неизвестные аргументы запуска.");
+                restored = StartupState.Decode(args[1]);
+            }
+            catch (ArgumentException ex)
+            {
+                MessageBox.Show(ex.Message, "RDP Shadow Manager", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return 2;
+            }
+        }
+        Application.Run(new MainForm(restored));
         return 0;
     }
 }

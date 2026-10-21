@@ -20,4 +20,14 @@ Check(!Connection.SameActiveUser(active, active with { Id = 13 }), "different ID
 Check(!Connection.SameActiveUser(active, active with { Domain = "OTHER" }), "different domain");
 Check(!(active with { Id = 0 }).CanConnect, "session zero");
 Check(!(active with { User = "" }).CanConnect, "service session");
+foreach (bool noConsent in new[] { false, true })
+{
+    var state = new StartupState("PC-01.example.org", noConsent);
+    Check(StartupState.Decode(state.Encode()) == state, "UAC state roundtrip");
+}
+var arbitraryState = new StartupState("ПК \" /control", false);
+Check(StartupState.Decode(arbitraryState.Encode()) == arbitraryState, "state preserves entered text without shell interpretation");
+Reject(() => StartupState.Decode("bad!"));
+Reject(() => StartupState.Decode(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("null"))));
+Reject(() => StartupState.Decode(new string('A', 16385)));
 Console.WriteLine($"PASS: {passed} checks");

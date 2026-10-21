@@ -2,12 +2,13 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Security.Principal;
 using RdpShadowManager.Core;
 
 namespace RdpShadowManager;
 internal sealed class MainForm : Form
 {
-    private readonly TextBox host = new() { Width = 280 };
+    private readonly TextBox host = new() { Width = 280, MaxLength = 253 };
     private readonly Button refresh = new() { Text = "Получить сеансы", AutoSize = true };
     private readonly Button connect = new() { Text = "Подключиться", AutoSize = true, Enabled = false };
     private readonly RadioButton consent = new() { Text = "С запросом согласия пользователя", Checked = true, AutoSize = true };
@@ -24,13 +25,13 @@ internal sealed class MainForm : Form
     private bool busy;
     private int revision;
     private Session? Selected => grid.CurrentRow?.DataBoundItem as Session;
-    public MainForm()
+    public MainForm(StartupState? restored = null)
     {
         Text = "RDP Shadow Manager"; AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new(900, 640); MinimumSize = new(760, 520);
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Padding = new(12) };
+        ClientSize = new(900, 720); MinimumSize = new(760, 600);
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8, Padding = new(12) };
         layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.Percent, 100));
-        for (int i=2;i<7;i++) layout.RowStyles.Add(new(SizeType.AutoSize));
+        for (int i=2;i<8;i++) layout.RowStyles.Add(new(SizeType.AutoSize));
         Controls.Add(layout);
         FlowLayoutPanel Row(params Control[] controls)
         {
@@ -42,14 +43,19 @@ internal sealed class MainForm : Form
         foreach (var (property, title) in new[] { ("User", "Пользователь"), ("Domain", "Домен"), ("Id", "ID сеанса"), ("Name", "Сеанс"), ("Status", "Состояние") })
             grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = property, HeaderText = title, SortMode = DataGridViewColumnSortMode.NotSortable });
         layout.Controls.Add(grid,0,1); layout.Controls.Add(Row(consent, noConsent),0,2);
-        var elevate = new Button { Text = "Перезапустить от имени администратора", AutoSize = true };
-        layout.Controls.Add(Row(connect, elevate, progress),0,3); layout.Controls.Add(status,0,4);
+        using var identity = WindowsIdentity.GetCurrent();
+        bool elevated = new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+        var elevate = new Button { Text = "Перезапустить от имени администратора", AutoSize = true, Enabled = !elevated };
+        var administration = new GroupBox { Text = "Администрирование", AutoSize = true, Dock = DockStyle.Fill, Padding = new(8), Margin = new(3, 12, 3, 8) };
+        administration.Controls.Add(Row(new Label { Text = elevated ? "Программа запущена от имени администратора" : "Программа запущена с обычными правами", AutoSize = true, Margin = new(3,8,12,3) }, elevate));
+        layout.Controls.Add(Row(connect, progress),0,3);
+        layout.Controls.Add(administration,0,4); layout.Controls.Add(status,0,5);
         var toggle = new CheckBox { Text = "Диагностика", AutoSize = true };
-        layout.Controls.Add(toggle,0,5);
+        layout.Controls.Add(toggle,0,6);
         diagnostics.Height = 150;
         var copy = new Button { Text = "Копировать", AutoSize = true, Dock = DockStyle.Bottom };
-        diagnostics.Controls.Add(log); diagnostics.Controls.Add(copy); layout.Controls.Add(diagnostics,0,6);
-        toggle.CheckedChanged += (_,_) => { diagnostics.Visible = toggle.Checked; layout.RowStyles[6].SizeType = SizeType.Absolute; layout.RowStyles[6].Height = toggle.Checked ? 150 : 0; };
+        diagnostics.Controls.Add(log); diagnostics.Controls.Add(copy); layout.Controls.Add(diagnostics,0,7);
+        toggle.CheckedChanged += (_,_) => { diagnostics.Visible = toggle.Checked; layout.RowStyles[7].SizeType = SizeType.Absolute; layout.RowStyles[7].Height = toggle.Checked ? 150 : 0; };
         copy.Click += (_,_) => { try { if (log.TextLength > 0) Clipboard.SetText(log.Text); } catch (Exception ex) { Failure("Копирование", host.Text, ex); } };
         host.TextChanged += (_,_) => { revision++; request?.Cancel(); grid.DataSource = null; UpdateConnect(); status.Text = "Компьютер изменён. Получите сеансы заново."; };
         grid.SelectionChanged += (_,_) => UpdateConnect();
@@ -59,7 +65,14 @@ internal sealed class MainForm : Form
         {
             try
             {
-                using var process = Process.Start(new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = true, Verb = "runas" });
+                var saved = new StartupState(host.Text, noConsent.Checked);
+                // Base64 has no spaces or shell metacharacters; runas uses ShellExecute.
+                var start = new ProcessStartInfo(Environment.ProcessPath!)
+                {
+                    UseShellExecute = true, Verb = "runas",
+                    Arguments = "--resume-state " + saved.Encode()
+                };
+                using var process = Process.Start(start);
                 if (process != null) Close();
             }
             catch (Exception ex) { Failure("Повышение прав", host.Text, ex); }
@@ -73,6 +86,13 @@ internal sealed class MainForm : Form
             }
         };
         AcceptButton = refresh;
+        if (restored != null)
+        {
+            host.Text = restored.Computer;
+            noConsent.Checked = restored.NoConsent;
+            consent.Checked = !restored.NoConsent;
+            Shown += async (_,_) => await Run(false);
+        }
     }
     private async Task CloseAfterOperation() { try { await operation!; } finally { Close(); } }
     private void UpdateConnect()
