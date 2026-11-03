@@ -2,7 +2,7 @@ param([Parameter(Mandatory=$true)][string]$RequestJson)
 # This script is sent ONLY through Invoke-Command. Never dot-source or execute it locally.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$result = @{ Code=1; Computer=$env:COMPUTERNAME; User=''; Sid=''; SessionId=0; MachineId=''; Versions=@(); Backups=@(); Conflicts=@(); Changed=@(); Errors=@(); Success=0; Skipped=0; Failed=0; BackupPath=''; OperationId=''; Message='' }
+$result = @{ Completed=$false; Verified=$false; Windows=''; WindowsVersion=''; Addresses=@(); Office=@(); OfficeKnown=$false; Code=1; Computer=$env:COMPUTERNAME; User=''; Sid=''; SessionId=0; MachineId=''; Versions=@(); Backups=@(); Conflicts=@(); Changed=@(); Errors=@(); Success=0; Skipped=0; Failed=0; BackupPath=''; OperationId=''; Message='' }
 $lock = $null; $held = $false
 $watch = [Diagnostics.Stopwatch]::StartNew()
 function Check-Deadline { if ($watch.Elapsed.TotalSeconds -gt 100) { throw 'Превышено время выполнения помощника. См. резервную копию и отчёт.' } }
@@ -11,15 +11,73 @@ try {
     $r = $RequestJson | ConvertFrom-Json
     $allowed = @('Action','Computer','LocalMachineId','SessionId','User','Domain','Sid','MachineId','Versions','CloseOutlook','BackupId','OperationId')
     foreach ($p in $r.PSObject.Properties.Name) { if ($p -notin $allowed) { throw "Неизвестный параметр: $p" } }
-    if ($r.Action -notin @('Inspect','Apply','RestorePreview','Restore')) { throw 'Неизвестная операция.' }
-    if ([int]$r.SessionId -le 0) { throw 'Некорректный ID сеанса.' }
+    if ($r.Action -notin @('Inspect','Apply','RestorePreview','Restore','ComputerInfo')) { throw 'Неизвестная операция.' }
+    if ($r.Action -ne 'ComputerInfo' -and [int]$r.SessionId -le 0) { throw 'Некорректный ID сеанса.' }
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if (-not ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Нужны административные права на удалённом компьютере.' }
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)
     try { $k=$base.OpenSubKey('SOFTWARE\Microsoft\Cryptography'); try { $machine=[string]$k.GetValue('MachineGuid') } finally { if ($k) { $k.Dispose() } } } finally { $base.Dispose() }
     if (-not $machine -or -not $r.LocalMachineId -or $machine -eq $r.LocalMachineId) { throw 'Локальный компьютер администратора исключён из обслуживания (MachineGuid совпадает или недоступен).' }
+    $result.OperationId=if ($r.Action -eq 'Restore') { [string]$r.BackupId } else { [string]$r.OperationId }
     $result.MachineId=$machine
-    if ($r.Action -ne 'Inspect' -and $machine -ne $r.MachineId) { throw 'Изменилась идентичность целевого компьютера. Откройте диалог заново.' }
+    if ($r.Action -notin @('Inspect','ComputerInfo') -and $machine -ne $r.MachineId) { throw 'Изменилась идентичность целевого компьютера. Откройте диалог заново.' }
+    if ($r.Action -eq 'ComputerInfo') {
+        try {
+            $os=Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+            $result.Windows=[string]$os.Caption
+        } catch { $result.Errors+="Windows: $($_.Exception.Message)" }
+        # Registry values are optional on older Windows; do not discard a known caption.
+        try {
+            $key=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SOFTWARE\Microsoft\Windows NT\CurrentVersion')
+            try {
+                $release=[string]$key.GetValue('DisplayVersion', $key.GetValue('ReleaseId',''))
+                $build=[string]$key.GetValue('CurrentBuildNumber','')
+                $ubr=[string]$key.GetValue('UBR','')
+                $result.WindowsVersion="$release, сборка $build.$ubr".Trim(', ')
+            } finally { if ($key) { $key.Dispose() } }
+        } catch { $result.Errors+="Версия Windows: $($_.Exception.Message)" }
+        try {
+            $active=@(Get-CimInstance Win32_NetworkAdapter -Filter 'NetConnectionStatus=2' -ErrorAction Stop | ForEach-Object { $_.InterfaceIndex })
+            $adapters=@(Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' -ErrorAction Stop | Where-Object { $_.InterfaceIndex -in $active })
+            $ordered=@($adapters | Sort-Object @{Expression={if ($_.DefaultIPGateway) {0} else {1}}}, InterfaceIndex)
+            $result.Addresses=@(@(foreach ($a in $ordered) { foreach ($ip in @($a.IPAddress)) {
+                $parsed=$null
+                if ([Net.IPAddress]::TryParse($ip,[ref]$parsed) -and -not [Net.IPAddress]::IsLoopback($parsed) -and $ip -notmatch '^(169\.254\.|fe80:|0\.|::($|%))') { $ip }
+            } }) | Select-Object -Unique)
+        } catch { $result.Errors+="IP: $($_.Exception.Message)" }
+        $officeErrors=@(); $products=@()
+        foreach ($view in @('Registry64','Registry32')) {
+            $h=$null
+            try {
+                $h=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::$view)
+                $c=$h.OpenSubKey('SOFTWARE\Microsoft\Office\ClickToRun\Configuration')
+                if ($c) { try {
+                    $ids=[string]$c.GetValue('ProductReleaseIds',''); $ver=[string]$c.GetValue('VersionToReport',''); $platform=[string]$c.GetValue('Platform','')
+                    $bits=if ($platform -eq 'x64') {'64 бит'} elseif ($platform -eq 'x86') {'32 бит'} else {'разрядность не определена'}
+                    foreach ($id in @($ids -split ',' | Where-Object {$_})) { $products+="Microsoft Office $id, версия $ver, $bits (Click-to-Run)" }
+                    if (-not $ids) { $officeErrors+='Click-to-Run: отсутствует ProductReleaseIds' }
+                } finally { $c.Dispose() } }
+                $u=$h.OpenSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall')
+                if (-not $u) { throw 'Раздел установленных программ недоступен' }
+                try { foreach ($name in $u.GetSubKeyNames()) {
+                    $k=$u.OpenSubKey($name)
+                    if (-not $k) { throw "Не прочитан продукт $name" }
+                    try {
+                        $title=[string]$k.GetValue('DisplayName','')
+                        if ($title -match '(?i)Microsoft.*(Office|365|Visio|Project|Outlook|Access)' -and [int]$k.GetValue('WindowsInstaller',0) -eq 1) {
+                            $version=[string]$k.GetValue('DisplayVersion','')
+                            $bits=if ($view -eq 'Registry64' -and [Environment]::Is64BitOperatingSystem) {'64 бит'} else {'32 бит'}
+                            $products+="$title, версия $version, $bits (MSI)"
+                        }
+                    } finally { $k.Dispose() }
+                } } finally { $u.Dispose() }
+            } catch { $officeErrors+="$view : $($_.Exception.Message)" } finally { if ($h) { $h.Dispose() } }
+        }
+        $result.Office=@($products | Select-Object -Unique); $result.OfficeKnown=($officeErrors.Count -eq 0)
+        $result.Errors+=@($officeErrors); $result.Completed=$true; $result.Code=0
+        ConvertTo-Json -InputObject $result -Depth 18 -Compress
+        return
+    }
     if (-not ('RsmNative' -as [type])) { Add-Type -TypeDefinition @'
 using System;
 using System.IO;
@@ -284,6 +342,7 @@ public static class RsmNative {
                 } catch { $result.Failed++; $result.Errors+="$($entry.Target.Hive)\$($entry.Target.Path) [$($entry.Target.View)] $($entry.Target.Name): $($_.Exception.Message)" }
             }
             if ($r.Action -eq 'Apply') { $backup.Complete=($result.Failed -eq 0); Save-Backup $backup $path }
+            $result.Verified=($result.Failed -eq 0 -and $result.Errors.Count -eq 0)
             $result.Code=if ($result.Failed -eq 0) { 0 } else { 1 }
             $result.Message=if ($result.Code -eq 0) { 'Помощник завершён; записанные значения проверены.' } else { 'Операция завершена с ошибками. Сохранена резервная копия; см. отчёт.' }
         }
@@ -296,4 +355,5 @@ public static class RsmNative {
     if ($held) { $lock.ReleaseMutex() }
     if ($lock) { $lock.Dispose() }
 }
+$result.Completed=$true
 ConvertTo-Json -InputObject $result -Depth 18 -Compress

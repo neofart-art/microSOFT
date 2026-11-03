@@ -11,6 +11,13 @@ internal sealed record MaintenanceRequest(string Action, string Computer, string
     bool CloseOutlook = false, string BackupId = "", string OperationId = "");
 internal sealed class MaintenanceResult
 {
+    public bool Completed { get; set; }
+    public bool Verified { get; set; }
+    public string Windows { get; set; } = "";
+    public string WindowsVersion { get; set; } = "";
+    public string[] Addresses { get; set; } = [];
+    public string[] Office { get; set; } = [];
+    public bool OfficeKnown { get; set; }
     public int Code { get; set; } = 1;
     public string Computer { get; set; } = "";
     public string User { get; set; } = "";
@@ -46,7 +53,7 @@ internal static class MaintenanceClient
         using var key = root.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography");
         return key?.GetValue("MachineGuid") as string ?? throw new InvalidOperationException("Не удалось прочитать локальный MachineGuid. Обслуживание заблокировано.");
     }
-    public static async Task<(MaintenanceResult Result, int ExitCode, string StandardError)> Run(MaintenanceRequest request)
+    public static async Task<(MaintenanceResult Result, int ExitCode, string StandardError)> Run(MaintenanceRequest request, CancellationToken cancellation = default)
     {
         Connection.ValidateHost(request.Computer);
         using var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("RdpShadowManager.Maintenance.RemoteMaintenance.ps1")
@@ -84,7 +91,8 @@ internal static class MaintenanceClient
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Не удалось запустить транспорт WinRM.");
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(150));
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        deadline.CancelAfter(TimeSpan.FromSeconds(request.Action == "ComputerInfo" ? 30 : 150));
         try
         {
             await process.StandardInput.WriteLineAsync(wrapper.AsMemory(), deadline.Token);
@@ -99,6 +107,7 @@ internal static class MaintenanceClient
         }
         catch (OperationCanceledException)
         {
+            cancellation.ThrowIfCancellationRequested();
             throw new TimeoutException($"Тайм-аут WinRM. Результат удалённой операции неизвестен; не считайте её успешной. ID: {request.OperationId}. Проверьте резервные копии на целевом ПК в %ProgramData%\\RdpShadowManager\\Backups. Удалённый помощник имеет собственный лимит времени и блокировку повторного запуска.");
         }
         finally
@@ -108,3 +117,4 @@ internal static class MaintenanceClient
         }
     }
 }
+

@@ -10,7 +10,7 @@ internal sealed partial class MainForm : Form
 {
     private readonly TextBox host = new() { Width = 280, MaxLength = 253 };
     private readonly Button refresh = new() { Text = "Получить сеансы", AutoSize = true };
-    private readonly Button connect = new() { Text = "Подключиться", AutoSize = true, Enabled = false };
+    private readonly Button connect = new ConnectButton() { Text = "Подключиться", Size = new(200, 46), Enabled = false };
     private readonly RadioButton consent = new() { Text = "С запросом согласия пользователя", Checked = true, AutoSize = true };
     private readonly RadioButton noConsent = new() { Text = "Без запроса согласия пользователя", AutoSize = true };
     private readonly DataGridView grid = new() { Dock = DockStyle.Fill, ReadOnly = true, MultiSelect = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill };
@@ -33,7 +33,7 @@ internal sealed partial class MainForm : Form
         using (var iconStream = typeof(MainForm).Assembly.GetManifestResourceStream("RdpShadowManager.Resources.app.ico")!)
             Icon = new Icon(iconStream, 256, 256);
         ShowIcon = true; ShowInTaskbar = true;
-        ClientSize = new(1174, 840); MinimumSize = new(1004, 700);
+        ClientSize = new(1174, 880); MinimumSize = new(1004, 740);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Padding = new(12), Margin = Padding.Empty };
         layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.Percent, 100));
         for (int i=2;i<9;i++) layout.RowStyles.Add(new(SizeType.AutoSize));
@@ -41,14 +41,14 @@ internal sealed partial class MainForm : Form
         shell.ColumnStyles.Add(new(SizeType.Percent, 100)); shell.ColumnStyles.Add(new(SizeType.Absolute, 224));
         shell.RowStyles.Add(new(SizeType.Percent, 100));
         Controls.Add(shell); shell.Controls.Add(layout, 0, 0);
-        var art = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new(12), Margin = Padding.Empty };
+        var art = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, AutoScroll = true, Padding = new(12), Margin = Padding.Empty };
         art.ColumnStyles.Add(new(SizeType.Percent, 100));
-        art.RowStyles.Add(new(SizeType.Absolute, 160)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.Percent, 100));
+        art.RowStyles.Add(new(SizeType.Absolute, 160)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.Percent, 100));
         using var imageStream = typeof(MainForm).Assembly.GetManifestResourceStream("RdpShadowManager.Resources.outlook-mascot.jpg")!;
         using var sourceImage = Image.FromStream(imageStream);
         var mascot = new PictureBox { Image = new Bitmap(sourceImage), SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.Fill, Margin = Padding.Empty, AccessibleName = "Персонаж Outlook", TabStop = false };
-        art.Controls.Add(mascot, 0, 0); art.Controls.Add(BuildPowerGroup(), 0, 1); shell.Controls.Add(art, 1, 0);
-        FormClosed += (_,_) => { mascot.Image?.Dispose(); Icon?.Dispose(); };
+        art.Controls.Add(mascot, 0, 0); art.Controls.Add(BuildComputerInfo(), 0, 1); art.Controls.Add(BuildPowerGroup(), 0, 2); shell.Controls.Add(art, 1, 0);
+        FormClosed += (_,_) => { infoCancellation?.Cancel(); infoTips.Dispose(); mascot.Image?.Dispose(); Icon?.Dispose(); };
         FlowLayoutPanel Row(params Control[] controls)
         {
             var row = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
@@ -67,7 +67,10 @@ internal sealed partial class MainForm : Form
         layout.Controls.Add(Row(connect, progress),0,3);
         layout.Controls.Add(administration,0,4);
         var maintenance = new GroupBox { Text = "Обслуживание", AutoSize = true, Dock = DockStyle.Fill, Padding = new(8) };
-        maintenance.Controls.Add(Row(repair, target));
+        var serviceLayout = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, RowCount = 2 };
+        serviceLayout.SizeChanged += (_, _) => serviceNotice.MaximumSize = new(Math.Max(100, serviceLayout.ClientSize.Width - 6), 0);
+        serviceLayout.Controls.Add(Row(repair, target), 0, 0); serviceLayout.Controls.Add(serviceNotice, 0, 1);
+        maintenance.Controls.Add(serviceLayout);
         layout.Controls.Add(maintenance,0,5); layout.Controls.Add(status,0,6);
         var toggle = new CheckBox { Text = "Диагностика", AutoSize = true };
         layout.Controls.Add(toggle,0,7);
@@ -76,9 +79,10 @@ internal sealed partial class MainForm : Form
         diagnostics.Controls.Add(log); diagnostics.Controls.Add(copy); layout.Controls.Add(diagnostics,0,8);
         toggle.CheckedChanged += (_,_) => { diagnostics.Visible = toggle.Checked; layout.RowStyles[8].SizeType = SizeType.Absolute; layout.RowStyles[8].Height = toggle.Checked ? 150 : 0; };
         copy.Click += (_,_) => { try { if (log.TextLength > 0) Clipboard.SetText(log.Text); } catch (Exception ex) { Failure("Копирование", host.Text, ex); } };
-        host.TextChanged += (_,_) => { revision++; request?.Cancel(); grid.DataSource = null; UpdateConnect(); status.Text = "Компьютер изменён. Получите сеансы заново."; };
+        host.TextChanged += (_,_) => { revision++; ClearComputerInfo(); ClearServiceNotice(); request?.Cancel(); grid.DataSource = null; UpdateConnect(); status.Text = "Компьютер изменён. Получите сеансы заново."; };
         grid.SelectionChanged += (_,_) =>
         {
+            ClearServiceNoticeIfTargetChanged();
             UpdateConnect();
             if (!busy && Selected is { CanConnect: false }) status.Text = "Этот сеанс не активен: подключение недоступно. Обновите список.";
         };
@@ -174,6 +178,7 @@ internal sealed partial class MainForm : Form
                 if (!launch)
                 {
                     grid.DataSource = result.Sessions; grid.ClearSelection(); grid.CurrentCell = null;
+                    _ = LoadComputerInfo();
                     status.Text = result.Sessions.Count == 0 ? "Пользовательские сеансы отсутствуют или сведения недоступны. См. диагностику." : "Выберите активный сеанс.";
                     return;
                 }
@@ -226,3 +231,4 @@ internal sealed partial class MainForm : Form
         }
     }
 }
+

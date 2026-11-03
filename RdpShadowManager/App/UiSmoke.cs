@@ -15,6 +15,9 @@ internal static class UiSmoke
             form.Show(); Application.DoEvents();
             var grid = Descendants(form).OfType<DataGridView>().Single();
             var picture = Descendants(form).OfType<PictureBox>().Single();
+            var connect = Descendants(form).OfType<Button>().Single(b => b.Text == "Подключиться");
+            if (connect.Width < 200 || connect.Height < 46 || !connect.Font.Bold || connect.FlatAppearance.BorderSize != 2)
+                throw new InvalidOperationException("Connect button size/style regression");
             var baseline = grid.Size;
             var baselineClient = form.ClientSize;
             if (scale != 1f)
@@ -43,6 +46,10 @@ internal static class UiSmoke
             checks.Add($"PASS: layout simulation {scale * 100:0}% | grid {grid.Width}x{grid.Height} | mascot {picture.Width}x{picture.Height}");
             form.Close();
         }
+        var infoChecks = MainForm.CheckComputerInfoStates();
+        while (!infoChecks.IsCompleted) { Application.DoEvents(); Thread.Sleep(10); }
+        infoChecks.GetAwaiter().GetResult();
+        checks.Add("PASS: remote info unavailable, no Office, multiple IPs, DNS label, refresh and stale response after host change");
         PowerSmoke.Run(output);
         checks.Add("PASS: power worker local-target protection and confirmation defaults (no real power API calls)");
         using var executableIcon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!);
@@ -67,3 +74,4 @@ internal static class UiSmoke
         }
     }
 }
+
