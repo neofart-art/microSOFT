@@ -37,6 +37,19 @@ internal sealed partial class MainForm
         Check(form.serviceNotice.Text.Contains("Завершено:") && form.serviceNotice.ForeColor == Color.ForestGreen, "Persistent maintenance result metadata");
         form.host.Text = "remote-c";
         Check(!form.serviceNotice.Visible, "Host change clears maintenance result");
+        var result = new MaintenanceResult { Code = 0 };
+        Check(MaintenanceOutcome(result, 0, "", true) == "unknown", "Starting a script is not success");
+        result.Completed = true;
+        Check(MaintenanceOutcome(result, 0, "", true) == "error", "Missing value verification is not success");
+        result.Verified = true;
+        Check(MaintenanceOutcome(result, 0, "", true) == "success", "Verified successful completion");
+        Check(MaintenanceOutcome(result, 1, "", true) == "error", "Nonzero exit is not success");
+        Check(MaintenanceOutcome(result, 0, "error", true) == "error", "Transport stderr prevents success");
+        Check(MaintenanceOutcome(result, 0, "", false) == "error", "Mismatched identity prevents success");
+        result.Success = 1; result.Failed = 1; result.Errors = ["write failed"];
+        Check(MaintenanceOutcome(result, 1, "", true) == "partial", "Partial writes must be orange");
+        result.Completed = false;
+        Check(MaintenanceOutcome(result, 1, "", true) == "unknown", "Lost completion response remains unconfirmed");
         form.Close();
     }
 }

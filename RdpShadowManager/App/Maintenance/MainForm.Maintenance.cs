@@ -18,6 +18,13 @@ internal sealed partial class MainForm
         serviceNotice.Visible = true;
         if (serviceNotice.Parent is {} parent) serviceNotice.MaximumSize = new(Math.Max(100, parent.ClientSize.Width - 6), 0);
     }
+    internal static string MaintenanceOutcome(MaintenanceResult result, int exitCode, string standardError, bool sameOperation)
+    {
+        if (!result.Completed) return "unknown";
+        if (sameOperation && exitCode == 0 && result.Code == 0 && result.Verified && result.Failed == 0
+            && result.Errors.Length == 0 && result.Conflicts.Length == 0 && standardError.Length == 0) return "success";
+        return sameOperation && result.Success > 0 ? "partial" : "error";
+    }
     private bool servicing;
     private bool serviceUncertain;
     private async Task Service()
@@ -64,9 +71,9 @@ internal sealed partial class MainForm
             bool confirmed = result.Completed;
             bool sameOperation = result.OperationId == (dialog.IsRestore ? request.BackupId : request.OperationId)
                 && result.MachineId == inspection.MachineId && result.Sid == inspection.Sid;
-            bool success = confirmed && sameOperation && finished.ExitCode == 0 && result.Code == 0 && result.Verified
-                && result.Failed == 0 && result.Errors.Length == 0 && result.Conflicts.Length == 0 && finished.StandardError.Length == 0;
-            bool partial = confirmed && sameOperation && !success && result.Success > 0;
+            var outcome = MaintenanceOutcome(result, finished.ExitCode, finished.StandardError, sameOperation);
+            bool success = outcome == "success";
+            bool partial = outcome == "partial";
             if (!confirmed) serviceUncertain = true;
             ShowServiceNotice(!confirmed ? "Результат выполнения не подтверждён"
                 : success ? dialog.IsRestore ? "Предыдущие настройки AutoDiscover успешно восстановлены" : "Настройки Outlook AutoDiscover успешно применены"

@@ -60,7 +60,7 @@ internal sealed partial class MainForm
                 try
                 {
                     addresses = (await InfoDns(computer, cancellation.Token)).Select(a => a.ToString()).Distinct().ToArray();
-                    ipLabel = "IP по DNS";
+                    ipLabel = IPAddress.TryParse(computer, out _) ? "IP из адреса" : "IP по DNS";
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex) { if (Current()) Trace("Сведения о ПК / DNS", computer, ex.Message, ex.HResult); }
