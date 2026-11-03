@@ -12,6 +12,10 @@ internal static class UiSmoke
         {
             using var form = new MainForm();
             form.MaximumSize = new(10000, 10000);
+            var infoGroup = Descendants(form).OfType<GroupBox>().Single(g => g.Text == "Сведения о ПК");
+            var info = Descendants(infoGroup).OfType<Label>().Single();
+            // Synthetic fixture exercises wrapping; never presented as real remote discovery.
+            info.Text = "Компьютер: TEST-REMOTE-WORKSTATION\nIP: 172.20.10.25 (+2, см. подсказку)\nWindows: Microsoft Windows 11 Pro\nВерсия: 24H2, сборка 26100.1234\nOffice: Microsoft Office ProPlus2019Volume, версия 16.0.10416.20073, 64 бит (Click-to-Run)\nMicrosoft Visio Professional 2021, версия 16.0.14332.21040, 32 бит (MSI)";
             form.Show(); Application.DoEvents();
             var grid = Descendants(form).OfType<DataGridView>().Single();
             var picture = Descendants(form).OfType<PictureBox>().Single();
@@ -34,6 +38,10 @@ internal static class UiSmoke
             var artBounds = form.RectangleToClient(picture.RectangleToScreen(picture.ClientRectangle));
             var gridBounds = form.RectangleToClient(grid.RectangleToScreen(grid.ClientRectangle));
             Check(!artBounds.IntersectsWith(gridBounds), "Mascot overlaps the table");
+            var infoBounds = form.RectangleToClient(info.RectangleToScreen(info.ClientRectangle));
+            Check(!infoBounds.IntersectsWith(gridBounds), "PC details overlap table");
+            Check(info.Height >= info.GetPreferredSize(new Size(info.Width, 0)).Height, "PC details text clipped vertically");
+            Check(info.Width <= info.Parent!.ClientSize.Width, "PC details text clipped horizontally");
             foreach (var button in Descendants(form).OfType<Button>().Where(b => b.Visible))
             {
                 var bounds = form.RectangleToClient(button.RectangleToScreen(button.ClientRectangle));
@@ -49,7 +57,7 @@ internal static class UiSmoke
         var infoChecks = MainForm.CheckComputerInfoStates();
         while (!infoChecks.IsCompleted) { Application.DoEvents(); Thread.Sleep(10); }
         infoChecks.GetAwaiter().GetResult();
-        checks.Add("PASS: remote info unavailable, no Office, multiple IPs, DNS label, refresh and stale response after host change");
+        checks.Add("PASS: remote info unavailable, no Office, multiple IPs, DNS label, refresh, stale response after host change, and verified/partial/error/unconfirmed AutoDiscover outcomes");
         PowerSmoke.Run(output);
         checks.Add("PASS: power worker local-target protection and confirmation defaults (no real power API calls)");
         using var executableIcon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!);

@@ -16,7 +16,7 @@ internal sealed partial class MainForm
         form.InfoQuery = (_, _) => Task.FromResult((new MaintenanceResult { Code = 0, Completed = true, Computer = "REMOTE-A", Windows = "Windows 11 Pro", WindowsVersion = "24H2, сборка 26100.1", OfficeKnown = true, Addresses = ["172.20.1.2", "172.20.1.3"] }, 0, ""));
         await form.LoadComputerInfo();
         Check(form.computerInfo.Text.Contains("Office не установлен"), "Confirmed absent Office");
-        Check(form.infoTips.GetToolTip(form.computerInfo).Contains("172.20.1.3"), "All IP addresses in tooltip");
+        Check((form.infoTips.GetToolTip(form.computerInfo) ?? "").Contains("172.20.1.3"), "All IP addresses in tooltip");
         form.InfoQuery = (_, _) => Task.FromResult((new MaintenanceResult { Code = 0, Completed = true, Office = ["Office 2019, 64 бит", "Visio 2021, 32 бит"] }, 0, ""));
         form.InfoDns = (_, _) => Task.FromResult(new[] { IPAddress.Parse("172.20.2.3") });
         await form.LoadComputerInfo();
