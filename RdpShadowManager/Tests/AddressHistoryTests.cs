@@ -31,7 +31,7 @@ internal static class AddressHistoryTests
             catch (InvalidDataException) { passed++; }
             var blocked = new AddressHistoryStore(folder);
             try { blocked.Save(["PC-01"]); throw new Exception("Save to directory unexpectedly succeeded"); }
-            catch (IOException) { passed++; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { passed++; }
             Check(!Directory.GetFiles(Path.GetDirectoryName(folder)!, Path.GetFileName(folder) + ".*.tmp").Any(), "Failed save cleans temporary file");
             store.Save([]);
             Check(store.Load().Length == 0, "Empty history roundtrip");
