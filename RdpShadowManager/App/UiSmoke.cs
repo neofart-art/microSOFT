@@ -54,6 +54,8 @@ internal static class UiSmoke
             checks.Add($"PASS: layout simulation {scale * 100:0}% | grid {grid.Width}x{grid.Height} | mascot {picture.Width}x{picture.Height}");
             form.Close();
         }
+        MainForm.CheckAddressHistoryUi(output);
+        checks.Add("PASS: address history survives form restart, editable dropdown/autocomplete, selection invalidates old sessions, MRU refresh preserves unchanged target");
         var infoChecks = MainForm.CheckComputerInfoStates();
         while (!infoChecks.IsCompleted) { Application.DoEvents(); Thread.Sleep(10); }
         infoChecks.GetAwaiter().GetResult();

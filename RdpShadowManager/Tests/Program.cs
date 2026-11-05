@@ -31,4 +31,5 @@ Reject(() => StartupState.Decode("bad!"));
 Reject(() => StartupState.Decode(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("null"))));
 Reject(() => StartupState.Decode(new string('A', 16385)));
 passed += PowerTests.Run();
+passed += AddressHistoryTests.Run();
 Console.WriteLine($"PASS: {passed} checks");

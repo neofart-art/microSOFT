@@ -8,7 +8,7 @@ using RdpShadowManager.Core;
 namespace RdpShadowManager;
 internal sealed partial class MainForm : Form
 {
-    private readonly TextBox host = new() { Width = 280, MaxLength = 253 };
+    private readonly ComboBox host = new() { Width = 280, MaxLength = 253, DropDownStyle = ComboBoxStyle.DropDown, AutoCompleteMode = AutoCompleteMode.SuggestAppend, AutoCompleteSource = AutoCompleteSource.ListItems, MaxDropDownItems = 12 };
     private readonly Button refresh = new() { Text = "Получить сеансы", AutoSize = true };
     private readonly Button connect = new ConnectButton() { Text = "Подключиться", Size = new(200, 46), Enabled = false };
     private readonly RadioButton consent = new() { Text = "С запросом согласия пользователя", Checked = true, AutoSize = true };
@@ -27,8 +27,9 @@ internal sealed partial class MainForm : Form
     private readonly Button elevate = new() { Text = "Перезапустить от имени администратора", AutoSize = true };
     private int revision;
     private Session? Selected => grid.CurrentRow?.DataBoundItem as Session;
-    public MainForm(StartupState? restored = null)
+    public MainForm(StartupState? restored = null, AddressHistoryStore? history = null)
     {
+        addressHistory = history ?? new AddressHistoryStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RdpShadowManager", "address-history.json"));
         Text = "RDP Shadow Manager"; AutoScaleMode = AutoScaleMode.Dpi; AutoScaleDimensions = new(96, 96);
         using (var iconStream = typeof(MainForm).Assembly.GetManifestResourceStream("RdpShadowManager.Resources.app.ico")!)
             Icon = new Icon(iconStream, 256, 256);
@@ -79,7 +80,7 @@ internal sealed partial class MainForm : Form
         diagnostics.Controls.Add(log); diagnostics.Controls.Add(copy); layout.Controls.Add(diagnostics,0,8);
         toggle.CheckedChanged += (_,_) => { diagnostics.Visible = toggle.Checked; layout.RowStyles[8].SizeType = SizeType.Absolute; layout.RowStyles[8].Height = toggle.Checked ? 150 : 0; };
         copy.Click += (_,_) => { try { if (log.TextLength > 0) Clipboard.SetText(log.Text); } catch (Exception ex) { Failure("Копирование", host.Text, ex); } };
-        host.TextChanged += (_,_) => { revision++; ClearComputerInfo(); ClearServiceNotice(); request?.Cancel(); grid.DataSource = null; UpdateConnect(); status.Text = "Компьютер изменён. Получите сеансы заново."; };
+        host.TextChanged += (_,_) => { if (updatingHistory) return; revision++; ClearComputerInfo(); ClearServiceNotice(); request?.Cancel(); grid.DataSource = null; UpdateConnect(); status.Text = "Компьютер изменён. Получите сеансы заново."; };
         grid.SelectionChanged += (_,_) =>
         {
             ClearServiceNoticeIfTargetChanged();
@@ -116,6 +117,7 @@ internal sealed partial class MainForm : Form
                 if (!closing) { closing = true; request?.Cancel(); _ = CloseAfterOperation(); }
             }
         };
+        InitializeAddressHistory();
         AcceptButton = refresh;
         if (restored != null)
         {
@@ -154,6 +156,7 @@ internal sealed partial class MainForm : Form
         string computer;
         try { computer = Connection.ValidateHost(host.Text); }
         catch (Exception ex) { Failure("Проверка адреса", host.Text, ex); return; }
+        if (!launch) RememberAddress(computer);
         var selected = Selected;
         if (launch && selected?.CanConnect != true) return;
         var noPrompt = noConsent.Checked;
