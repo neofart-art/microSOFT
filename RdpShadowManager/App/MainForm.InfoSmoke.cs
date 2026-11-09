@@ -72,6 +72,29 @@ internal sealed partial class MainForm
         Check(MaintenanceOutcome(result, 1, "", true) == "unknown", "Lost completion response remains unconfirmed");
         form.Close();
     }
+    internal static void CheckHiddenPowerShell()
+    {
+        var executable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe");
+        var start = MaintenanceClient.HiddenPowerShellStart(executable);
+        const string probe = """
+            $ErrorActionPreference='Stop'
+            Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class RsmConsoleProbe { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'
+            [Console]::Write([RsmConsoleProbe]::GetConsoleWindow().ToInt64())
+            """;
+        foreach (var arg in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", probe }) start.ArgumentList.Add(arg);
+        using var process = System.Diagnostics.Process.Start(start) ?? throw new InvalidOperationException("PowerShell console probe did not start");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(15000))
+        {
+            process.Kill(true); process.WaitForExit();
+            throw new InvalidOperationException("PowerShell console probe timed out");
+        }
+        var actual = output.GetAwaiter().GetResult().Trim();
+        var stderr = error.GetAwaiter().GetResult();
+        if (process.ExitCode != 0 || actual != "0")
+            throw new InvalidOperationException($"PowerShell has a console or probe failed: exit={process.ExitCode}, handle={actual}, {stderr}");
+    }
     private static bool HasVersionPicker(Control parent) =>
         parent.Controls.Cast<Control>().Any(c => c is CheckedListBox || HasVersionPicker(c));
 }

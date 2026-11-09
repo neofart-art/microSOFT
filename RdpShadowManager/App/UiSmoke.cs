@@ -61,6 +61,8 @@ internal static class UiSmoke
         while (!infoChecks.IsCompleted) { Application.DoEvents(); Thread.Sleep(10); }
         infoChecks.GetAwaiter().GetResult();
         checks.Add("PASS: remote info unavailable, no Office, multiple IPs, DNS label, refresh, stale response after host change, and verified/partial/error/unconfirmed AutoDiscover outcomes");
+        MainForm.CheckHiddenPowerShell();
+        checks.Add("PASS: real hidden Windows PowerShell process reports GetConsoleWindow=0; no console was allocated");
         PowerSmoke.Run(output);
         checks.Add("PASS: power worker local-target protection and confirmation defaults (no real power API calls)");
         using var executableIcon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!);

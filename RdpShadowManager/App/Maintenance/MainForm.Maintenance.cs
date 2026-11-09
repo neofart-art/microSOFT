@@ -46,7 +46,7 @@ internal sealed partial class MainForm
                 !result.Completed ? "Не получено подтверждение завершения удалённого помощника." :
                 !result.Verified ? "Не подтверждена проверка всех значений реестра." :
                 result.Code == 0 ? "Ответ не прошёл проверку идентичности операции или целевого пользователя." : result.Message.Length > 0 ? result.Message : "Результат не прошёл проверку кода завершения.";
-            text += $"Почему не полностью: {reason}\nКод помощника: {result.Code}.\n";
+            text += $"{(outcome == "partial" ? "Почему не полностью" : "Причина")}: {reason}\nКод помощника: {result.Code}.\n";
             if (result.Changed.Length > 0)
                 text += "Подтверждённые изменения:\n" + string.Join("\n", result.Changed.Take(5).Select(c =>
                     c.TryGetProperty("Name", out var name) ? name.GetString() : "значение реестра")) + "\n";
