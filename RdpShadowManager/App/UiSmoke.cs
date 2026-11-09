@@ -22,7 +22,7 @@ internal static class UiSmoke
                 throw new InvalidOperationException("Connect button size/style regression");
             var power = Descendants(form).OfType<GroupBox>().Single(g => g.Text == "Питание удалённого компьютера");
             var summary = Descendants(form).OfType<GroupBox>().Single(g => g.Text == "Компьютер и время работы");
-            if (power.Height > 150 || summary.Top < power.Bottom) throw new InvalidOperationException("Power block must be compact with summary below it");
+            if (power.Height > 150 || summary.Top < power.Bottom) throw new InvalidOperationException($"Power block must be compact with summary below it: power={power.Bounds}, summary={summary.Bounds}, parent={power.Parent!.ClientSize}");
             var baseline = grid.Size;
             var baselineClient = form.ClientSize;
             if (scale != 1f)
