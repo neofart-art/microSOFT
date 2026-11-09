@@ -45,6 +45,7 @@ internal static class UiSmoke
                 Check(!bounds.IntersectsWith(gridBounds), "PC details overlap table");
                 Check(field.Width >= 120 * scale, "PC detail field is too narrow");
                 Check(field.ReadOnly && field.ShortcutsEnabled && field.WordWrap, "PC fields must support selection/copy and wrapping");
+                if (field is ReadableInfoField readable) Check(field.ScrollBars == ScrollBars.None && field.Height >= readable.RequiredHeight(), "Full PC value must fit without internal scrolling");
             }
             foreach (var button in Descendants(form).OfType<Button>().Where(b => b.Visible))
             {
