@@ -2,17 +2,41 @@ param([Parameter(Mandatory=$true)][string]$RequestJson)
 # This script is sent ONLY through Invoke-Command. Never dot-source or execute it locally.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$result = @{ Completed=$false; Verified=$false; OutlookDetectionError=''; Windows=''; WindowsVersion=''; Addresses=@(); PrimaryIPv4=''; Office=@(); OfficeKnown=$false; Code=1; Computer=$env:COMPUTERNAME; User=''; Sid=''; SessionId=0; MachineId=''; Versions=@(); Backups=@(); Conflicts=@(); Changed=@(); Errors=@(); Success=0; Skipped=0; Failed=0; BackupPath=''; OperationId=''; Message='' }
+$result = @{ Completed=$false; Verified=$false; OutlookDetectionError=''; Windows=''; WindowsVersion=''; Addresses=@(); PrimaryIPv4=''; RdpIPv4=''; Office=@(); OfficeKnown=$false; Code=1; Computer=$env:COMPUTERNAME; User=''; Sid=''; SessionId=0; MachineId=''; Versions=@(); Backups=@(); Conflicts=@(); Changed=@(); Errors=@(); Success=0; Skipped=0; Failed=0; BackupPath=''; OperationId=''; Message='' }
 $lock = $null; $held = $false
 $watch = [Diagnostics.Stopwatch]::StartNew()
 function Check-Deadline { if ($watch.Elapsed.TotalSeconds -gt 100) { throw 'Превышено время выполнения помощника. См. резервную копию и отчёт.' } }
+function Normalize-IPv4([string]$value) {
+    $ip=$null
+    if (-not [Net.IPAddress]::TryParse($value,[ref]$ip)) { return '' }
+    if ($ip.IsIPv4MappedToIPv6) { $ip=$ip.MapToIPv4() }
+    if ($ip.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or [Net.IPAddress]::IsLoopback($ip) -or $ip.Equals([Net.IPAddress]::Any)) { return '' }
+    return $ip.ToString()
+}
+function Find-RdpIPv4([object[]]$connections,[string[]]$clients) {
+    $known=@($clients | ForEach-Object { Normalize-IPv4 $_ } | Where-Object {$_} | Select-Object -Unique)
+    return @(@(foreach ($connection in $connections) {
+        $local=Normalize-IPv4 ([string]$connection.LocalAddress)
+        $peer=Normalize-IPv4 ([string]$connection.RemoteAddress)
+        if ($connection.LocalPort -eq 3389 -and [string]$connection.State -eq 'Established' -and $local -and $peer -in $known) { $local }
+    }) | Select-Object -Unique)
+}
+function Read-RdpConnection {
+    try {
+        $connections=@(Get-NetTCPConnection -State Established -ErrorAction Stop | Where-Object {$_.LocalPort -eq 3389})
+        $matching=@(Find-RdpIPv4 $connections @($r.ClientIPv4))
+        if ($matching.Count -eq 1) { $result.RdpIPv4=[string]$matching[0] }
+        elseif ($matching.Count -gt 1) { $result.Errors+='Несколько RDP-адресов текущего клиента; адрес соединения неоднозначен.' }
+        return @($matching)
+    } catch { $result.Errors+="Проверка адреса RDP: $($_.Exception.Message)"; return @() }
+}
 try {
     if (-not (Get-Variable PSSenderInfo -ErrorAction SilentlyContinue) -or $null -eq $PSSenderInfo) { throw 'Помощник разрешён только в удалённой WinRM-сессии. Локальный запуск запрещён.' }
     $r = $RequestJson | ConvertFrom-Json
-    $allowed = @('Action','Computer','LocalMachineId','SessionId','User','Domain','Sid','MachineId','Versions','CloseOutlook','BackupId','OperationId')
+    $allowed = @('Action','Computer','LocalMachineId','SessionId','User','Domain','Sid','MachineId','Versions','CloseOutlook','BackupId','OperationId','ClientIPv4')
     foreach ($p in $r.PSObject.Properties.Name) { if ($p -notin $allowed) { throw "Неизвестный параметр: $p" } }
-    if ($r.Action -notin @('Inspect','Apply','RestorePreview','Restore','ComputerInfo')) { throw 'Неизвестная операция.' }
-    if ($r.Action -ne 'ComputerInfo' -and [int]$r.SessionId -le 0) { throw 'Некорректный ID сеанса.' }
+    if ($r.Action -notin @('Inspect','Apply','RestorePreview','Restore','ComputerInfo','ConnectionInfo')) { throw 'Неизвестная операция.' }
+    if ($r.Action -notin @('ComputerInfo','ConnectionInfo') -and [int]$r.SessionId -le 0) { throw 'Некорректный ID сеанса.' }
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if (-not ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Нужны административные права на удалённом компьютере.' }
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)
@@ -20,7 +44,13 @@ try {
     if (-not $machine -or -not $r.LocalMachineId -or $machine -eq $r.LocalMachineId) { throw 'Локальный компьютер администратора исключён из обслуживания (MachineGuid совпадает или недоступен).' }
     $result.OperationId=if ($r.Action -eq 'Restore') { [string]$r.BackupId } else { [string]$r.OperationId }
     $result.MachineId=$machine
-    if ($r.Action -notin @('Inspect','ComputerInfo') -and $machine -ne $r.MachineId) { throw 'Изменилась идентичность целевого компьютера. Откройте диалог заново.' }
+    if ($r.Action -notin @('Inspect','ComputerInfo','ConnectionInfo') -and $machine -ne $r.MachineId) { throw 'Изменилась идентичность целевого компьютера. Откройте диалог заново.' }
+    if ($r.Action -eq 'ConnectionInfo') {
+        $result.Addresses=@(Read-RdpConnection)
+        $result.Code=0; $result.Completed=$true
+        ConvertTo-Json -InputObject $result -Depth 18 -Compress
+        return
+    }
     if ($r.Action -eq 'ComputerInfo') {
         try {
             $os=Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
@@ -37,9 +67,11 @@ try {
             } finally { if ($key) { $key.Dispose() } }
         } catch { $result.Errors+="Версия Windows: $($_.Exception.Message)" }
         try {
-            $active=@(Get-CimInstance Win32_NetworkAdapter -Filter 'NetConnectionStatus=2' -ErrorAction Stop | ForEach-Object { $_.InterfaceIndex })
+            $activeAdapters=@(Get-CimInstance Win32_NetworkAdapter -Filter 'NetConnectionStatus=2' -ErrorAction Stop)
+            $active=@($activeAdapters | ForEach-Object { $_.InterfaceIndex })
+            $physical=@($activeAdapters | Where-Object {$_.PhysicalAdapter -eq $true} | ForEach-Object {$_.InterfaceIndex})
             $adapters=@(Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' -ErrorAction Stop | Where-Object { $_.InterfaceIndex -in $active })
-            $ordered=@($adapters | Sort-Object @{Expression={if ($_.DefaultIPGateway) {0} else {1}}}, InterfaceIndex)
+            $ordered=@($adapters | Sort-Object @{Expression={if ($_.InterfaceIndex -in $physical) {0} else {1}}}, @{Expression={if ($_.DefaultIPGateway) {0} else {1}}}, InterfaceIndex)
             $result.Addresses=@(@(foreach ($a in $ordered) { foreach ($ip in @($a.IPAddress)) {
                 $parsed=$null
                 if ([Net.IPAddress]::TryParse($ip,[ref]$parsed) -and -not [Net.IPAddress]::IsLoopback($parsed) -and $ip -notmatch '^(169\.254\.|fe80:|0\.|::($|%))') { $ip }
@@ -49,6 +81,8 @@ try {
                 [Net.IPAddress]::TryParse($_,[ref]$parsed) -and $parsed.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork
             } | Select-Object -First 1))
         } catch { $result.Errors+="IP: $($_.Exception.Message)" }
+        $rdpAddresses=@(Read-RdpConnection)
+        $result.Addresses=@(@($result.Addresses) + @($rdpAddresses) | Select-Object -Unique)
         $officeErrors=@(); $products=@()
         foreach ($view in @('Registry64','Registry32')) {
             $h=$null

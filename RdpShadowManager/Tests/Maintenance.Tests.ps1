@@ -10,7 +10,7 @@ function Assert($value,[string]$message) { if (-not $value) { throw $message }; 
 # A direct invocation must stop before any registry or process access.
 $guard=& ([ScriptBlock]::Create($source)) '{"Action":"Inspect"}' | ConvertFrom-Json
 Assert ($guard.Code -ne 0 -and $guard.Message -match 'WinRM') 'Local invocation must fail closed'
-foreach ($name in @('New-Plan','Read-Value','Write-Value','Same-Value','Save-Backup','Restore-Conflict','Resolve-OutlookVersions','Assert-AutomaticVersions')) {
+foreach ($name in @('New-Plan','Read-Value','Write-Value','Same-Value','Save-Backup','Restore-Conflict','Resolve-OutlookVersions','Assert-AutomaticVersions','Normalize-IPv4','Find-RdpIPv4')) {
     $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
     if (-not $node) { throw "Missing function: $name" }
     . ([ScriptBlock]::Create($node.Extent.Text))
@@ -35,6 +35,17 @@ try { Assert-AutomaticVersions $office2019 @('15.0'); throw 'Changed versions ac
 try { Assert-AutomaticVersions $missing @(); throw 'Absent Outlook accepted' } catch { Assert ($_.Exception.Message -ne 'Absent Outlook accepted') 'No writes when automatic discovery fails' }
 # Detection and branch validation must precede backup creation / mutation.
 Assert ($source.IndexOf('$versions=@(Assert-AutomaticVersions') -lt $source.IndexOf('$entries=@()')) 'Automatic validation precedes registry mutation planning'
+$sockets=@(
+ @{LocalAddress='172.31.1.11';RemoteAddress='172.31.1.99';LocalPort=3389;State='Established'},
+ @{LocalAddress='26.209.222.170';RemoteAddress='26.0.0.9';LocalPort=3389;State='Established'},
+ @{LocalAddress='26.209.222.170';RemoteAddress='172.31.1.99';LocalPort=443;State='Established'}
+)
+Assert ((@(Find-RdpIPv4 $sockets @('172.31.1.99')) -join ',') -eq '172.31.1.11') 'Current client RDP connection selects 172.31.1.11, not unrelated 26 address'
+Assert (@(Find-RdpIPv4 $sockets @('192.0.2.99')).Count -eq 0) 'Other users connections cannot determine current endpoint'
+Assert (@(Find-RdpIPv4 @(@{LocalAddress='172.31.1.11';RemoteAddress='172.31.1.99';LocalPort=3389;State='Listen'}) @('172.31.1.99')).Count -eq 0) 'Listening socket is not connected'
+Assert ((Normalize-IPv4 '::ffff:172.31.1.11') -eq '172.31.1.11') 'IPv4 mapped server socket is normalized to IPv4'
+Assert ((Normalize-IPv4 '2001:db8::1') -eq '') 'Native IPv6 is not displayed'
+Assert (@(Find-RdpIPv4 @($sockets[0],@{LocalAddress='172.31.1.12';RemoteAddress='172.31.1.99';LocalPort=3389;State='Established'}) @('172.31.1.99')).Count -eq 2) 'Multiple endpoints are kept ambiguous, not guessed'
 $native=$ast.Find({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Type'},$true)
 . ([ScriptBlock]::Create($native.Extent.Text))
 Assert ($null -ne ('RsmNative' -as [type])) 'Native WTS and token-check code compiles'

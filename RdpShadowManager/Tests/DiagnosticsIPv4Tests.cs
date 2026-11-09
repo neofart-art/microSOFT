@@ -27,12 +27,16 @@ internal static class DiagnosticsIPv4Tests
         Check(!ComputerIPv4.IsEstablishedRdpEndpoint(2, 0x3d0d), "Pending TCP connection is not established");
         var selected = ComputerIPv4.Select("172.31.1.11", "10.8.0.2", ["10.8.0.2", "172.31.1.11", "2001:db8::1"]);
         Check(selected.Address == "172.31.1.11" && selected.Source.Contains("TCP"), "Observed connection IPv4 takes priority over VPN/primary");
-        Check(ComputerIPv4.Select(null, "172.31.1.11", ["10.8.0.2"]).Address == "172.31.1.11", "Fallback uses remote primary");
-        Check(ComputerIPv4.Select("2001:db8::1", "172.31.1.11", []).Address == "172.31.1.11", "IPv6 endpoint is never displayed");
+        Check(ComputerIPv4.Select(null, "172.31.1.11", ["10.8.0.2", "172.31.1.11"]).Address == "172.31.1.11", "Fallback uses remote primary");
+        Check(ComputerIPv4.Select("2001:db8::1", "172.31.1.11", ["172.31.1.11"]).Address == "172.31.1.11", "IPv6 endpoint is never displayed");
         Check(ComputerIPv4.Select(null, null, ["2001:db8::1", "172.31.1.11", "10.8.0.2"]).Address == "172.31.1.11", "Legacy gateway-ordered fallback filters IPv6");
         Check(ComputerIPv4.Select(null, null, ["2001:db8::1"]).Address == "", "IPv6-only target remains unknown");
         Check(ComputerIPv4.Normalize("::ffff:172.31.1.11") == null && ComputerIPv4.Normalize("127.0.0.1") == null, "No IPv6-mapped or loopback display");
         Check(ComputerIPv4.Addresses(["172.31.1.11", "172.31.1.11", "2001:db8::1"]).SequenceEqual(new[] { "172.31.1.11" }), "IPv4 candidates deduplicated");
+        Check(ComputerIPv4.Select("26.209.222.170", "172.31.1.11", ["172.31.1.11"]).Address == "172.31.1.11", "Unrelated/DNS-only 26 address is never displayed");
+        Check(ComputerIPv4.Select(null, "26.209.222.170", ["172.31.1.11"]).Address == "172.31.1.11", "Primary must belong to confirmed remote interfaces");
+        Check(ComputerIPv4.Select("26.209.222.170", "26.209.222.170", ["172.31.1.11", "26.209.222.170"], "172.31.1.11").Address == "172.31.1.11", "Server RDP socket confirms LAN target rather than virtual interface");
+        Check(ComputerIPv4.Select("26.209.222.170", null, []).Address == "", "No confirmed data means unknown rather than a guessed address");
         Console.WriteLine($"PASS: {count} PowerShell stream/IPv4 checks");
         return count;
     }

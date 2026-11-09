@@ -16,7 +16,7 @@ internal sealed partial class MainForm
     private long infoGeneration;
     private bool infoAvailable;
     internal Func<string, CancellationToken, Task<(MaintenanceResult Result, int ExitCode, string StandardError)>> InfoQuery =
-        (computer, token) => MaintenanceClient.Run(new MaintenanceRequest("ComputerInfo", computer, MaintenanceClient.LocalMachineId(), 0, "", ""), token);
+        (computer, token) => MaintenanceClient.Run(new MaintenanceRequest("ComputerInfo", computer, MaintenanceClient.LocalMachineId(), 0, "", "", ClientIPv4: RdpConnections.LocalIPv4Addresses()), token);
     internal Func<string, CancellationToken, Task<IPAddress[]>> InfoDns = (computer, token) => Dns.GetHostAddressesAsync(computer, token);
     private Control BuildComputerInfo()
     {
@@ -85,16 +85,11 @@ internal sealed partial class MainForm
             catch (Exception ex) { if (Current()) Trace("Сведения о ПК", computer, ex.ToString(), ex.HResult); }
             if (!Current()) return;
             currentRemoteAddresses = data?.Addresses ?? [];
-            string[] dns = [];
-            try { dns = (await InfoDns(computer, cancellation.Token)).Select(a => a.ToString()).ToArray(); }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { if (Current()) Trace("IPv4 / DNS", computer, ex.Message, ex.HResult); }
-            if (!Current()) return;
             string? connected = null;
-            try { connected = await InfoConnectedIPv4(computer, ComputerIPv4.Addresses(currentRemoteAddresses.Concat(dns)), cancellation.Token); }
+            try { connected = await InfoConnectedIPv4(computer, ComputerIPv4.Addresses(currentRemoteAddresses), cancellation.Token); }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { if (Current()) Trace("IPv4 подключения", computer, ex.Message, ex.HResult); }
-            var selectedIPv4 = ComputerIPv4.Select(connected, data?.PrimaryIPv4, currentRemoteAddresses);
+            var selectedIPv4 = ComputerIPv4.Select(connected, data?.PrimaryIPv4, currentRemoteAddresses, data?.RdpIPv4);
             if (!Current()) return;
             string Known(string? value) => string.IsNullOrWhiteSpace(value) ? "Не удалось определить" : value;
             var office = data?.Office ?? [];

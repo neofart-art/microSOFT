@@ -22,9 +22,10 @@ internal sealed partial class MainForm
         await form.LoadComputerInfo();
         Check(form.infoOffice.Text.Contains("Office не установлен"), "Confirmed absent Office");
         Check(form.infoAddresses.Text == "IPv4: 172.20.1.3", "Only primary IPv4 without IPv6 is displayed");
-        form.InfoConnectedIPv4 = (_, _, _) => Task.FromResult<string?>("172.31.1.11");
+        form.InfoQuery = (_, _) => Task.FromResult((new MaintenanceResult { Code = 0, Completed = true, PrimaryIPv4 = "10.8.0.2", RdpIPv4 = "172.31.1.11", Addresses = ["10.8.0.2", "172.31.1.11"], OfficeKnown = true }, 0, ""));
+        form.InfoConnectedIPv4 = (_, _, _) => Task.FromResult<string?>("26.209.222.170");
         await form.LoadComputerInfo();
-        Check(form.infoAddresses.Text == "IPv4: 172.31.1.11" && form.infoAddresses.Lines.Length == 1, "LAN connection wins over another primary/VPN address");
+        Check(form.infoAddresses.Text == "IPv4: 172.31.1.11" && form.infoAddresses.Lines.Length == 1, "Remote RDP socket wins over unrelated 26 address and VPN primary");
         form.InfoConnectedIPv4 = (_, _, _) => Task.FromResult<string?>(null);
         form.InfoQuery = (_, _) => Task.FromResult((new MaintenanceResult { Code = 0, Completed = true, Office = ["Office 2019, 64 бит", "Visio 2021, 32 бит"] }, 0, ""));
         form.InfoDns = (_, _) => Task.FromResult(new[] { IPAddress.Parse("172.20.2.3") });

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using RdpShadowManager.Core;
 
@@ -8,6 +9,10 @@ namespace RdpShadowManager;
 internal sealed record RdpClientProcess(int Id, DateTime Started);
 internal static class RdpConnections
 {
+    public static string[] LocalIPv4Addresses() => NetworkInterface.GetAllNetworkInterfaces()
+        .Where(n => n.OperationalStatus == OperationalStatus.Up)
+        .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+        .Select(a => ComputerIPv4.Normalize(a.Address.ToString())).Where(a => a != null).Cast<string>().Distinct().ToArray();
     [DllImport("iphlpapi.dll")]
     private static extern uint GetExtendedTcpTable(IntPtr table, ref int size,
         [MarshalAs(UnmanagedType.Bool)] bool order, int family, int tableClass, uint reserved);
@@ -72,9 +77,9 @@ internal sealed partial class MainForm
             if (clients.Count > 16) clients.RemoveRange(0, clients.Count - 16);
             if (rdpClients.Count > 30)
                 foreach (var key in rdpClients.Keys.Where(k => !k.Equals(computer, StringComparison.OrdinalIgnoreCase)).Take(rdpClients.Count - 30).ToArray()) rdpClients.Remove(key);
-            _ = WatchRdpAddress(computer);
         }
         catch (Exception ex) { Trace("Адрес подключения mstsc", computer, ex.Message, ex.HResult); }
+        _ = WatchRdpAddress(computer);
     }
     private Task<string?> ReadConnectedIPv4(string computer, string[] candidates, CancellationToken token)
     {
@@ -87,21 +92,28 @@ internal sealed partial class MainForm
         var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30)); rdpPolling = cancellation;
         try
         {
-            string[] dns = [];
-            try { dns = (await InfoDns(computer, cancellation.Token)).Select(ip => ip.ToString()).ToArray(); }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { Trace("IPv4 / DNS", computer, ex.Message, ex.HResult); }
             while (!cancellation.IsCancellationRequested && !IsDisposed && !closing
                 && host.Text.Trim().Equals(computer, StringComparison.OrdinalIgnoreCase))
             {
-                var candidate = await InfoConnectedIPv4(computer, ComputerIPv4.Addresses(currentRemoteAddresses.Concat(dns)), cancellation.Token);
-                if (!string.IsNullOrEmpty(ComputerIPv4.Normalize(candidate)))
+                var candidate = await InfoConnectedIPv4(computer, ComputerIPv4.Addresses(currentRemoteAddresses), cancellation.Token);
+                if (!string.IsNullOrEmpty(ComputerIPv4.Normalize(candidate)) && currentRemoteAddresses.Contains(candidate))
                 {
                     if (!IsDisposed && !closing && host.Text.Trim().Equals(computer, StringComparison.OrdinalIgnoreCase))
-                        ShowComputerIPv4(new(candidate!, "Установленное TCP-подключение mstsc"));
+                        ShowComputerIPv4(ComputerIPv4.Select(candidate, null, currentRemoteAddresses));
                     return;
                 }
-                await Task.Delay(1000, cancellation.Token);
+                var proof = await MaintenanceClient.Run(new MaintenanceRequest("ConnectionInfo", computer,
+                    MaintenanceClient.LocalMachineId(), 0, "", "", ClientIPv4: RdpConnections.LocalIPv4Addresses()), cancellation.Token);
+                if (IsDisposed || closing || !host.Text.Trim().Equals(computer, StringComparison.OrdinalIgnoreCase)) return;
+                Trace("IPv4 / удалённое RDP-соединение", computer, proof.Result.Report(), proof.ExitCode);
+                TracePowerShellStreams("IPv4 / удалённое RDP-соединение", computer, proof.StandardError, proof.ExitCode);
+                if (proof.ExitCode == 0 && proof.Result.Completed && proof.Result.RdpIPv4.Length > 0
+                    && PowerShellDiagnostics.Analyze(proof.StandardError).Errors.Length == 0)
+                {
+                    var selected = ComputerIPv4.Select(null, null, proof.Result.Addresses, proof.Result.RdpIPv4);
+                    if (selected.Address.Length > 0) { ShowComputerIPv4(selected); return; }
+                }
+                await Task.Delay(2000, cancellation.Token);
             }
         }
         catch (OperationCanceledException) { }

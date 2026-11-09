@@ -8,7 +8,7 @@ using RdpShadowManager.Core;
 namespace RdpShadowManager;
 internal sealed record MaintenanceRequest(string Action, string Computer, string LocalMachineId, int SessionId,
     string User, string Domain, string Sid = "", string MachineId = "", string[]? Versions = null,
-    bool CloseOutlook = false, string BackupId = "", string OperationId = "");
+    bool CloseOutlook = false, string BackupId = "", string OperationId = "", string[]? ClientIPv4 = null);
 internal sealed class MaintenanceResult
 {
     public string OutlookDetectionError { get; set; } = "";
@@ -16,6 +16,7 @@ internal sealed class MaintenanceResult
     public bool Verified { get; set; }
     public string Windows { get; set; } = "";
     public string WindowsVersion { get; set; } = "";
+    public string RdpIPv4 { get; set; } = "";
     public string PrimaryIPv4 { get; set; } = "";
     public string[] Addresses { get; set; } = [];
     public string[] Office { get; set; } = [];
@@ -101,7 +102,7 @@ internal static class MaintenanceClient
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        deadline.CancelAfter(TimeSpan.FromSeconds(request.Action == "ComputerInfo" ? 30 : 150));
+        deadline.CancelAfter(TimeSpan.FromSeconds(request.Action is "ComputerInfo" or "ConnectionInfo" ? 30 : 150));
         try
         {
             await process.StandardInput.WriteLineAsync(wrapper.AsMemory(), deadline.Token);

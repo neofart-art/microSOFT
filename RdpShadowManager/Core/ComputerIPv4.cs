@@ -12,13 +12,18 @@ public static class ComputerIPv4
         state == 5 && (ushort)IPAddress.NetworkToHostOrder((short)networkOrderPort) == 3389;
     public static string[] Addresses(IEnumerable<string?> values) =>
         values.Select(Normalize).Where(a => a != null).Cast<string>().Distinct().ToArray();
-    public static IPv4Choice Select(string? connected, string? primary, IEnumerable<string?> remote)
+    public static IPv4Choice Select(string? connected, string? primary, IEnumerable<string?> remote, string? serverConnected = null)
     {
+        var known = Addresses(remote);
         var endpoint = Normalize(connected);
-        if (endpoint != null) return new(endpoint, "Установленное TCP-подключение mstsc");
+        var server = Normalize(serverConnected);
+        if (server != null && known.Contains(server))
+            return new(server, "RDP-соединение подтверждено на удалённом ПК");
+        if (endpoint != null && known.Contains(endpoint))
+            return new(endpoint, "Подтверждённое TCP-подключение mstsc");
         var main = Normalize(primary);
-        if (main != null) return new(main, "Основной IPv4 удалённого ПК");
-        var fallback = Addresses(remote).FirstOrDefault();
+        if (main != null && known.Contains(main)) return new(main, "Основной IPv4 удалённого ПК");
+        var fallback = known.FirstOrDefault();
         return fallback == null ? new("", "IPv4 не определён") : new(fallback, "Основной IPv4 удалённого ПК");
     }
 }
