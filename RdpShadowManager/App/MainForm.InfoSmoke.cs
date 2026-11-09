@@ -3,10 +3,13 @@ using System.Net;
 namespace RdpShadowManager;
 internal sealed partial class MainForm
 {
-    internal void SetInfoSmokeFixture() => SetComputerDetails("TEST-REMOTE-WORKSTATION",
+    internal void SetInfoSmokeFixture() { SetComputerDetails("TEST-REMOTE-WORKSTATION",
         "IPv4: 172.20.10.25",
         "Майкрософт Windows 11 Pro\r\n24H2, сборка 26100.1234",
         "Microsoft Office HomeBusinessRetail, версия 16.0.19127.20860, 64 бит (Click-to-Run)\r\nMicrosoft Visio Professional 2021, версия 16.0.14332.21040, 32 бит (MSI)");
+        ShowHardwareSummary(new SystemInfoData { Model = "TEST Laptop", SerialNumber = "TEST-SERIAL", LastBoot = "2026-11-08T10:00:00Z",
+            UptimeSeconds = 86400, InstalledRamBytes = 17179869184, Cpus = [new() { Name = "TEST CPU" }] });
+    }
     internal static async Task CheckComputerInfoStates()
     {
         using var form = new MainForm();
@@ -45,12 +48,18 @@ internal sealed partial class MainForm
         Check(form.infoComputer.Text == expected && form.infoRefresh.Enabled, "Late response must not replace selected host");
         form.ShowServiceNotice("Настройки применены", Color.ForestGreen, "remote-b", "DOMAIN\\user");
         Check(form.serviceNotice.Text == "Настройки применены" && form.serviceNotice.ForeColor == Color.ForestGreen, "Persistent maintenance result metadata");
-        foreach (var field in new[] { form.infoComputer, form.infoAddresses, form.infoWindows, form.infoOffice })
+        foreach (var field in new[] { form.infoComputer, form.infoAddresses, form.infoWindows, form.infoOffice }.Concat(form.hardwareFields.Values))
         {
             Check(field.ReadOnly && field.ShortcutsEnabled && field.WordWrap && field.Multiline, "Info values must be read-only, selectable and wrapped");
             field.Focus(); field.SelectAll(); field.Copy();
             if (field.Text.Length > 0) Check(Clipboard.GetText() == field.Text, "Separate field Ctrl+C copy failed");
         }
+        form.ShowHardwareSummary(new SystemInfoData { Model = "TEST Laptop", SerialNumber = "TEST-SERIAL", LastBoot = "2026-11-08T10:00:00Z",
+            UptimeSeconds = 86400, InstalledRamBytes = 17179869184, Cpus = [new() { Name = "TEST CPU" }] });
+        Check(form.hardwareFields["model"].Text == "TEST Laptop" && form.hardwareFields["cpu"].Text == "TEST CPU"
+            && form.hardwareFields["uptime"].Text == "1 д 00:00:00", "Sidebar summary shows requested hardware and uptime");
+        form.host.Text = "new-pc";
+        Check(form.hardwareFields.Values.All(f => f.Text.Contains("Не удалось")), "Host change clears old hardware summary");
         Clipboard.Clear();
         var start = MaintenanceClient.HiddenPowerShellStart("powershell.exe");
         Check(start.CreateNoWindow && !start.UseShellExecute && start.WindowStyle == System.Diagnostics.ProcessWindowStyle.Hidden

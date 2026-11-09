@@ -13,6 +13,7 @@ internal sealed partial class MainForm
             (result, code, stderr) =>
             {
                 if (IsDisposed) return;
+                if (result.Completed && result.Code == 0 && host.Text.Trim().Equals(computer, StringComparison.OrdinalIgnoreCase)) ShowHardwareSummary(result.SystemInfo);
                 Trace("Дополнительные сведения", computer, result.Report(), code);
                 TracePowerShellStreams("Дополнительные сведения", computer, stderr, code);
             });

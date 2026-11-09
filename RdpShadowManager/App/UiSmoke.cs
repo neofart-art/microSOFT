@@ -20,6 +20,9 @@ internal static class UiSmoke
             var connect = Descendants(form).OfType<Button>().Single(b => b.Text == "Подключиться");
             if (connect.Width < 400 || connect.Height < 46 || !connect.Font.Bold || connect.FlatAppearance.BorderSize != 2)
                 throw new InvalidOperationException("Connect button size/style regression");
+            var power = Descendants(form).OfType<GroupBox>().Single(g => g.Text == "Питание удалённого компьютера");
+            var summary = Descendants(form).OfType<GroupBox>().Single(g => g.Text == "Компьютер и время работы");
+            if (power.Height > 150 || summary.Top < power.Bottom) throw new InvalidOperationException("Power block must be compact with summary below it");
             var baseline = grid.Size;
             var baselineClient = form.ClientSize;
             if (scale != 1f)

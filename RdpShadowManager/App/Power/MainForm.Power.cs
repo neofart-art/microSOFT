@@ -5,16 +5,20 @@ using RdpShadowManager.Core;
 namespace RdpShadowManager;
 internal sealed partial class MainForm
 {
-    private readonly Button restartComputer = new() { Text = "Перезагрузить компьютер", Width = 176, Height = 48 };
-    private readonly Button shutdownComputer = new() { Text = "Выключить компьютер", Width = 176, Height = 48 };
-    private readonly Button abortPower = new() { Text = "Отменить запланированное действие", Width = 176, Height = 60 };
-    private readonly Label powerTarget = new() { AutoSize = true, MaximumSize = new(176, 0) };
+    private readonly Button restartComputer = new() { Text = "Перезагрузить", Width = 100, Height = 32 };
+    private readonly Button shutdownComputer = new() { Text = "Выключить", Width = 90, Height = 32 };
+    private readonly Button abortPower = new() { Text = "Отменить действие", Width = 120, Height = 32 };
+    private readonly Label powerTarget = new() { AutoSize = true, MaximumSize = new(352, 0) };
     private bool powering;
     private GroupBox BuildPowerGroup()
     {
         var group = new GroupBox { Text = "Питание удалённого компьютера", Dock = DockStyle.Fill, AutoSize = true, Padding = new(8), Margin = new(0,12,0,0) };
-        var controls = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-        controls.Controls.AddRange([powerTarget, restartComputer, shutdownComputer, abortPower]); group.Controls.Add(controls);
+        var controls = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, RowCount = 2 };
+        controls.ColumnStyles.Add(new(SizeType.Percent, 100));
+        controls.RowStyles.Add(new(SizeType.AutoSize)); controls.RowStyles.Add(new(SizeType.AutoSize));
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true, Margin = Padding.Empty };
+        buttons.Controls.AddRange([restartComputer, shutdownComputer, abortPower]);
+        controls.Controls.Add(powerTarget, 0, 0); controls.Controls.Add(buttons, 0, 1); group.Controls.Add(controls);
         restartComputer.Click += async (_,_) => await SendPower(PowerAction.Restart);
         shutdownComputer.Click += async (_,_) => await SendPower(PowerAction.Shutdown);
         abortPower.Click += async (_,_) => await SendPower(PowerAction.Abort);

@@ -14,7 +14,6 @@ internal sealed class SystemInfoData
     public CpuInfo[] Cpus { get; set; } = [];
     public VolumeInfo[] Volumes { get; set; } = [];
     public PhysicalDiskInfo[] PhysicalDisks { get; set; } = [];
-    public BitLockerInfo[] BitLocker { get; set; } = [];
     public UpdateInfo[] Updates { get; set; } = [];
     public bool? RebootPending { get; set; }
     public string[] RebootReasons { get; set; } = [];
@@ -41,14 +40,6 @@ internal sealed class PhysicalDiskInfo
     public string Health { get; set; } = "";
     public string OperationalStatus { get; set; } = "";
     public long? SizeBytes { get; set; }
-}
-internal sealed class BitLockerInfo
-{
-    public string Drive { get; set; } = "";
-    public int? ProtectionStatus { get; set; }
-    public int? ConversionStatus { get; set; }
-    public int? EncryptionPercent { get; set; }
-    public int? LockStatus { get; set; }
 }
 internal sealed class UpdateInfo
 {

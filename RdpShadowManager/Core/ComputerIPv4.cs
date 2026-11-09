@@ -23,7 +23,6 @@ public static class ComputerIPv4
             return new(endpoint, "Подтверждённое TCP-подключение mstsc");
         var main = Normalize(primary);
         if (main != null && known.Contains(main)) return new(main, "Основной IPv4 удалённого ПК");
-        var fallback = known.FirstOrDefault();
-        return fallback == null ? new("", "IPv4 не определён") : new(fallback, "Основной IPv4 удалённого ПК");
+        return new("", "Адрес соединения или основной LAN IPv4 не подтверждён");
     }
 }

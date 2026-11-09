@@ -38,7 +38,6 @@ internal sealed class SystemInfoDialog : Form
         AddTab("disks", "Диски", [
             ("volumes", new[] { "Локальный диск", "Файловая система", "Размер", "Свободно", "Свободно, %" }),
             ("physical", new[] { "Физический диск", "Размер", "Состояние Windows", "Операционное состояние" })]);
-        AddTab("security", "BitLocker", [("bitlocker", new[] { "Том", "Защита", "Шифрование", "Зашифровано, %", "Блокировка" })]);
         AddTab("updates", "Обновления и перезагрузка", [("updates", new[] { "Обновление", "Описание", "Установлено" })]);
         refresh.Click += async (_,_) => await RefreshData();
         Shown += async (_,_) => { if (autoLoad) await RefreshData(); };
@@ -125,12 +124,6 @@ internal sealed class SystemInfoDialog : Form
         false => "Признаков ожидающей перезагрузки не обнаружено",
         null => "Не удалось определить, ожидается ли перезагрузка"
     };
-    internal static string Protection(int? code) => code switch { 0 => "Отключена", 1 => "Включена", _ => "Не удалось определить" };
-    private static string Conversion(int? code) => code switch
-    {
-        0 => "Не зашифрован", 1 => "Зашифрован", 2 => "Шифрование выполняется", 3 => "Расшифровка выполняется",
-        4 => "Шифрование приостановлено", 5 => "Расшифровка приостановлена", _ => "Не удалось определить"
-    };
     private string SectionNotes(SystemInfoData data, params string[] sections) => string.Join(Environment.NewLine, sections.Select(s =>
     {
         var state = data.Sections.GetValueOrDefault(s, "unknown");
@@ -155,13 +148,9 @@ internal sealed class SystemInfoDialog : Form
         foreach (var volume in data.Volumes) Row("volumes", Known(volume.Drive), Known(volume.FileSystem), Bytes(volume.SizeBytes), Bytes(volume.FreeBytes),
             volume.SizeBytes is > 0 && volume.FreeBytes.HasValue ? Percent(100d*volume.FreeBytes.Value/volume.SizeBytes.Value) : "Не удалось определить");
         foreach (var disk in data.PhysicalDisks) Row("physical", Known(disk.Name), Bytes(disk.SizeBytes), Known(disk.Health), Known(disk.OperationalStatus));
-        foreach (var volume in data.BitLocker) Row("bitlocker", Known(volume.Drive), Protection(volume.ProtectionStatus), Conversion(volume.ConversionStatus),
-            Percent(volume.EncryptionPercent), volume.LockStatus switch {0=>"Разблокирован",1=>"Заблокирован",_=>"Не удалось определить"});
         foreach (var update in data.Updates) Row("updates", Known(update.Id), Known(update.Description), Known(update.InstalledOn));
         notes["general"].Text = "Снимок CPU/ОЗУ; «Обновить» выполняет новый запрос.\r\n" + SectionNotes(data, "computer", "performance");
         notes["disks"].Text = "Только локальные фиксированные диски. Состояние Storage/Windows не заменяет полную SMART-диагностику.\r\n" + SectionNotes(data, "volumes", "physical");
-        notes["security"].Text = "Только статус BitLocker. Ключи восстановления и защитники не запрашиваются.\r\n" + SectionNotes(data, "bitlocker") +
-            (data.BitLocker.Length == 0 ? "\r\nНет доступных записей о томах; это не означает, что BitLocker выключен." : "");
         notes["updates"].Text = RebootText(data.RebootPending) + "\r\n" + string.Join("\r\n", data.RebootReasons) +
             "\r\nПоследние 20 QFE-обновлений Windows; это не полная история Windows Update, Office или Store.\r\n" + SectionNotes(data, "updates", "restart");
     }

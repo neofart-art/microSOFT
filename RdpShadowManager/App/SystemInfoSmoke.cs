@@ -14,10 +14,9 @@ internal static class SystemInfoSmoke
             Cpus = [new() { Name = "Synthetic CPU", Cores = 8, LogicalProcessors = 16, LoadPercent = 25 }],
             Volumes = [new() { Drive = "C:", FileSystem = "NTFS", SizeBytes = 107374182400, FreeBytes = 53687091200 }],
             PhysicalDisks = [new() { Name = "Synthetic SSD", Health = "Healthy", OperationalStatus = "OK", SizeBytes = 107374182400 }],
-            BitLocker = [new() { Drive = "C:", ProtectionStatus = 1, ConversionStatus = 1, EncryptionPercent = 100, LockStatus = 0 }],
             Updates = [new() { Id = "KB-TEST-ONLY", Description = "Synthetic security update", InstalledOn = "2026-11-08" }],
             RebootPending = true, RebootReasons = ["Windows Update ожидает перезагрузку"],
-            Sections = new[] { "computer", "performance", "volumes", "physical", "bitlocker", "updates", "restart" }.ToDictionary(k => k, _ => "ok")
+            Sections = new[] { "computer", "performance", "volumes", "physical", "updates", "restart" }.ToDictionary(k => k, _ => "ok")
         };
         var reply = new MaintenanceResult { Code = 0, Completed = true, Computer = "TEST-PC", SystemInfo = data };
         int queries = 0;
@@ -26,19 +25,18 @@ internal static class SystemInfoSmoke
         await dialog.RefreshData();
         Check(queries == 1 && dialog.RefreshEnabled, "Additional info request did not complete");
         var tables = dialog.Tables.ToArray();
-        Check(tables.Length == 5 && tables.All(g => g.ReadOnly && !g.AllowUserToAddRows && !g.AllowUserToDeleteRows
+        Check(tables.Length == 4 && tables.All(g => g.ReadOnly && !g.AllowUserToAddRows && !g.AllowUserToDeleteRows
             && g.ClipboardCopyMode == DataGridViewClipboardCopyMode.EnableAlwaysIncludeHeaderText), "Additional tables must be read-only and copyable");
-        Check(tables.Sum(g => g.Rows.Count) >= 15, "Requested information missing from result");
+        Check(tables.Sum(g => g.Rows.Count) >= 14, "Requested information missing from result");
         Check(SystemInfoDialog.Bytes(null).Contains("Не удалось") && SystemInfoDialog.Percent(null).Contains("Не удалось"), "Unknown numeric values must not become zero");
         Check(SystemInfoDialog.Uptime(86400) == "1 д 00:00:00" && SystemInfoDialog.Uptime(null).Contains("Не удалось"), "Uptime formatting must preserve unknown state");
-        Check(SystemInfoDialog.Protection(null).Contains("Не удалось") && SystemInfoDialog.Protection(1) == "Включена", "Unknown BitLocker is not disabled");
         Check(SystemInfoDialog.RebootText(false).Contains("не обнаружено") && SystemInfoDialog.RebootText(null).Contains("Не удалось"), "Missing reboot state is not a false no-reboot claim");
         var general = tables[0]; general.SelectAll();
         var copy = general.GetClipboardContent();
         Check(copy != null && copy.GetText().Contains("TEST-SERIAL-NOT-REAL"), "Read-only table copy must contain full values");
         dialog.SaveSmokeImages(output);
-        data.Sections["bitlocker"] = "error"; data.BitLocker = [];
-        data.SectionErrors["bitlocker"] = ["Access denied (test fixture)"];
+        data.Sections["physical"] = "error"; data.PhysicalDisks = [];
+        data.SectionErrors["physical"] = ["Access denied (test fixture)"];
         await dialog.RefreshData();
         Check(dialog.StatusText.Contains("Часть сведений"), "One failed section must not discard the rest");
         var pending = new TaskCompletionSource<(MaintenanceResult, int, string)>();
@@ -51,6 +49,6 @@ internal static class SystemInfoSmoke
         Check(waiting.StatusText.Contains("недоступны") && waiting.RefreshEnabled, "Remote denial must be shown without stale values");
         Check(waiting.Tables.All(g => g.Rows.Count == 0), "Failure must not retain previous computer data");
         waiting.Close(); dialog.Close();
-        File.WriteAllText(Path.Combine(output, "system-info-checks.txt"), "PASS: all additional categories, readonly table copy, unknown numeric/BitLocker/restart states, partial failures, access denial and refresh single-flight. Synthetic data only; no remote changes.");
+        File.WriteAllText(Path.Combine(output, "system-info-checks.txt"), "PASS: all additional categories, readonly table copy, unknown numeric/restart states, partial failures, access denial and refresh single-flight. Synthetic data only; no remote changes.");
     }
 }

@@ -43,13 +43,13 @@ internal sealed partial class MainForm : Form
         shell.ColumnStyles.Add(new(SizeType.Percent, 100)); shell.ColumnStyles.Add(new(SizeType.Absolute, 400));
         shell.RowStyles.Add(new(SizeType.Percent, 100));
         Controls.Add(shell); shell.Controls.Add(layout, 0, 0);
-        var art = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, AutoScroll = true, Padding = new(12), Margin = Padding.Empty };
+        var art = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, AutoScroll = true, Padding = new(12), Margin = Padding.Empty };
         art.ColumnStyles.Add(new(SizeType.Percent, 100));
-        art.RowStyles.Add(new(SizeType.Absolute, 160)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.Percent, 100));
+        art.RowStyles.Add(new(SizeType.Absolute, 160)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.Percent, 100));
         using var imageStream = typeof(MainForm).Assembly.GetManifestResourceStream("RdpShadowManager.Resources.outlook-mascot.jpg")!;
         using var sourceImage = Image.FromStream(imageStream);
         var mascot = new PictureBox { Image = new Bitmap(sourceImage), SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.None, Anchor = AnchorStyles.Top | AnchorStyles.Right, Size = new(200, 160), Margin = Padding.Empty, AccessibleName = "Персонаж Outlook", TabStop = false };
-        art.Controls.Add(mascot, 0, 0); art.Controls.Add(BuildComputerInfo(), 0, 1); art.Controls.Add(BuildPowerGroup(), 0, 2); shell.Controls.Add(art, 1, 0);
+        art.Controls.Add(mascot, 0, 0); art.Controls.Add(BuildComputerInfo(), 0, 1); art.Controls.Add(BuildPowerGroup(), 0, 2); art.Controls.Add(BuildHardwareSummary(), 0, 3); shell.Controls.Add(art, 1, 0);
         FormClosed += (_,_) => { rdpPolling?.Cancel(); infoCancellation?.Cancel(); infoTips.Dispose(); mascot.Image?.Dispose(); Icon?.Dispose(); };
         FlowLayoutPanel Row(params Control[] controls)
         {

@@ -55,14 +55,15 @@ function Read-RestartIndicators {
         return @{Pending=($reasons.Count -gt 0);Reasons=$reasons}
     } finally { $base.Dispose() }
 }
-function Get-SystemInformation {
+function Get-SystemInformation([string[]]$sections=@('computer','performance','volumes','physical','updates','restart')) {
     $details=@{
         CapturedAt=[DateTimeOffset]::UtcNow.ToString('O');Manufacturer='';Model='';SerialNumber='';Windows='';LastBoot='';UptimeSeconds=$null;
-        InstalledRamBytes=$null;VisibleRamBytes=$null;FreeRamBytes=$null;Cpus=@();Volumes=@();PhysicalDisks=@();BitLocker=@();Updates=@();
+        InstalledRamBytes=$null;VisibleRamBytes=$null;FreeRamBytes=$null;Cpus=@();Volumes=@();PhysicalDisks=@();Updates=@();
         RebootPending=$null;RebootReasons=@();Sections=@{};SectionErrors=@{}
     }
     $cache=@{OS=$null}
     function Read-Section([string]$section,[scriptblock]$read) {
+        if ($section -notin $sections) { return }
         $details.Sections[$section]='loading'
         try {
             if ($watch.Elapsed.TotalSeconds -gt 50) { throw 'Достигнут лимит времени чтения сведений.' }
@@ -115,22 +116,6 @@ function Get-SystemInformation {
             @{Name=[string]$_.FriendlyName;Health=[string]$_.HealthStatus;OperationalStatus=(@($_.OperationalStatus) -join ', ');SizeBytes=$_.Size}
         })
     }
-    Read-Section 'bitlocker' {
-        # Query only status properties/methods; never request protectors, recovery keys or passwords.
-        $volumes=@(Read-SystemCim 'Win32_EncryptableVolume' @('DriveLetter','ProtectionStatus') 'root/cimv2/Security/MicrosoftVolumeEncryption')
-        $details.BitLocker=@(foreach ($volume in $volumes) {
-            $row=@{Drive=[string]$volume.DriveLetter;ProtectionStatus=$volume.ProtectionStatus;ConversionStatus=$null;EncryptionPercent=$null;LockStatus=$null}
-            try {
-                $conversion=Invoke-CimMethod -InputObject $volume -MethodName GetConversionStatus -OperationTimeoutSec 6 -ErrorAction Stop
-                if ($conversion.ReturnValue -ne 0) { throw "GetConversionStatus вернул код $($conversion.ReturnValue)" }
-                $row.ConversionStatus=$conversion.ConversionStatus; $row.EncryptionPercent=$conversion.EncryptionPercentage
-                $lock=Invoke-CimMethod -InputObject $volume -MethodName GetLockStatus -OperationTimeoutSec 6 -ErrorAction Stop
-                if ($lock.ReturnValue -ne 0) { throw "GetLockStatus вернул код $($lock.ReturnValue)" }
-                $row.LockStatus=$lock.LockStatus
-            } catch { $details.SectionErrors['bitlocker']=@($details.SectionErrors['bitlocker'])+@($_.Exception.Message) }
-            $row
-        })
-    }
     Read-Section 'updates' {
         $rows=@(Read-SystemCim 'Win32_QuickFixEngineering' @('HotFixID','Description','InstalledOn') | ForEach-Object {
             $date=[datetime]::MinValue
@@ -148,36 +133,62 @@ function Get-SystemInformation {
     }
     return $details
 }
-try {
-    if (-not (Get-Variable PSSenderInfo -ErrorAction SilentlyContinue) -or $null -eq $PSSenderInfo) { throw 'Помощник разрешён только в удалённой WinRM-сессии. Локальный запуск запрещён.' }
-    $r = $RequestJson | ConvertFrom-Json
-    $allowed = @('Action','Computer','LocalMachineId','SessionId','User','Domain','Sid','MachineId','Versions','CloseOutlook','BackupId','OperationId','ClientIPv4')
-    foreach ($p in $r.PSObject.Properties.Name) { if ($p -notin $allowed) { throw "Неизвестный параметр: $p" } }
-    if ($r.Action -notin @('Inspect','Apply','RestorePreview','Restore','ComputerInfo','ConnectionInfo','SystemInfo')) { throw 'Неизвестная операция.' }
-    if ($r.Action -notin @('ComputerInfo','ConnectionInfo') -and [int]$r.SessionId -le 0) { throw 'Некорректный ID сеанса.' }
+function Get-RequestPolicy([string]$action) {
+    switch ($action) {
+        'Inspect' { return @{RequiresSession=$true;RequiresPinnedMachine=$false} }
+        {$_ -in @('Apply','RestorePreview','Restore')} { return @{RequiresSession=$true;RequiresPinnedMachine=$true} }
+        {$_ -in @('ComputerInfo','ConnectionInfo','SystemInfo')} { return @{RequiresSession=$false;RequiresPinnedMachine=$false} }
+        default { throw 'Неизвестная операция.' }
+    }
+}
+function Assert-RemotingContext {
+    if (-not (Get-Variable PSSenderInfo -ErrorAction SilentlyContinue) -or $null -eq $PSSenderInfo) {
+        throw 'Помощник разрешён только в удалённой WinRM-сессии. Локальный запуск запрещён.'
+    }
+}
+function Get-RemoteMachineIdentity([string]$localMachineId) {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if (-not ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Нужны административные права на удалённом компьютере.' }
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)
     try { $k=$base.OpenSubKey('SOFTWARE\Microsoft\Cryptography'); try { $machine=[string]$k.GetValue('MachineGuid') } finally { if ($k) { $k.Dispose() } } } finally { $base.Dispose() }
-    if (-not $machine -or -not $r.LocalMachineId -or $machine -eq $r.LocalMachineId) { throw 'Локальный компьютер администратора исключён из обслуживания (MachineGuid совпадает или недоступен).' }
-    $result.OperationId=if ($r.Action -eq 'Restore') { [string]$r.BackupId } else { [string]$r.OperationId }
-    $result.MachineId=$machine
-    if ($r.Action -notin @('Inspect','ComputerInfo','ConnectionInfo') -and $machine -ne $r.MachineId) { throw 'Изменилась идентичность целевого компьютера. Откройте диалог заново.' }
-    if ($r.Action -eq 'SystemInfo') {
-        $result.SystemInfo=Get-SystemInformation
-        foreach ($messages in $result.SystemInfo.SectionErrors.Values) { $result.Errors+=@($messages | Where-Object {$_}) }
-        $result.Code=0; $result.Completed=$true
-        $result.Message=if ($result.Errors.Count -eq 0) {'Сведения прочитаны.'} else {'Часть сведений недоступна. См. ошибки разделов.'}
-        ConvertTo-Json -InputObject $result -Depth 18 -Compress
-        return
+    if (-not $machine -or -not $localMachineId -or $machine -eq $r.LocalMachineId) { throw 'Локальный компьютер администратора исключён из обслуживания (MachineGuid совпадает или недоступен).' }
+    return $machine
+}
+function Get-AdapterValue($item,[string]$name) {
+    if ($null -eq $item) { return $null }
+    if ($item -is [Collections.IDictionary]) { return $item[$name] }
+    $property=$item.PSObject.Properties[$name]
+    if ($property) { return $property.Value }
+    return $null
+}
+function Select-LanIPv4([object[]]$adapters,[object[]]$metadata) {
+    $choices=@()
+    foreach ($adapter in $adapters) {
+        $index=Get-AdapterValue $adapter 'InterfaceIndex'
+        $meta=@($metadata | Where-Object {(Get-AdapterValue $_ 'InterfaceIndex') -eq $index} | Select-Object -First 1)
+        if ($meta.Count -eq 0) { continue }
+        $item=$meta[0]
+        $description=@('Name','Description','NetConnectionID','ServiceName' | ForEach-Object {[string](Get-AdapterValue $item $_)}) -join ' '
+        $pnp=[string](Get-AdapterValue $item 'PNPDeviceID')
+        # Some VPN drivers report PhysicalAdapter=true; use driver identity as well.
+        if ($description -match '(?i)Radmin|VPN|WireGuard|OpenVPN|ZeroTier|Hamachi|VirtualBox|VMware|Hyper-V|Virtual|(^|\s)(TAP|TUN)(\s|$)' -or $pnp -match '(?i)^(ROOT|SWD|SW)\\') { continue }
+        if (-not ((Get-AdapterValue $item 'PhysicalAdapter') -eq $true -or $pnp -match '(?i)^(PCI|USB|ACPI)\\')) { continue }
+        $addresses=@(Get-AdapterValue $adapter 'IPAddress' | ForEach-Object {Normalize-IPv4 ([string]$_)} | Where-Object {$_ -and $_ -notmatch '^169\.254\.'} | Select-Object -Unique)
+        if ($addresses.Count -eq 0) { continue }
+        $gateway=@(Get-AdapterValue $adapter 'DefaultIPGateway' | ForEach-Object {Normalize-IPv4 ([string]$_)} | Where-Object {$_}).Count -gt 0
+        $metric=Get-AdapterValue $adapter 'IPConnectionMetric'
+        if ($null -eq $metric) { $metric=[int]::MaxValue }
+        $choices+=@{Addresses=$addresses;GatewayScore=$(if ($gateway) {0} else {1});Metric=[long]$metric}
     }
-    if ($r.Action -eq 'ConnectionInfo') {
-        $result.Addresses=@(Read-RdpConnection)
-        $result.Code=0; $result.Completed=$true
-        ConvertTo-Json -InputObject $result -Depth 18 -Compress
-        return
-    }
-    if ($r.Action -eq 'ComputerInfo') {
+    if ($choices.Count -eq 0) { return @{Address='';Reason='Нет однозначного аппаратного LAN/Wi-Fi IPv4; VPN-адрес не подставлен.'} }
+    $ordered=@($choices | Sort-Object GatewayScore,Metric)
+    $best=@($ordered | Where-Object {$_.GatewayScore -eq $ordered[0].GatewayScore -and $_.Metric -eq $ordered[0].Metric})
+    $addresses=@($best | ForEach-Object {$_.Addresses} | Select-Object -Unique)
+    if ($addresses.Count -ne 1) { return @{Address='';Reason='Несколько равноправных LAN IPv4; адрес без подтверждённого соединения не выбран.'} }
+    return @{Address=[string]$addresses[0];Reason='Основной аппаратный LAN/Wi-Fi IPv4'}
+}
+function Get-ComputerInformation {
+        $result.SystemInfo=Get-SystemInformation @('computer','performance')
         try {
             $os=Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
             $result.Windows=[string]$os.Caption
@@ -202,10 +213,9 @@ try {
                 $parsed=$null
                 if ([Net.IPAddress]::TryParse($ip,[ref]$parsed) -and -not [Net.IPAddress]::IsLoopback($parsed) -and $ip -notmatch '^(169\.254\.|fe80:|0\.|::($|%))') { $ip }
             } }) | Select-Object -Unique)
-            $result.PrimaryIPv4=[string](@($result.Addresses | Where-Object {
-                $parsed=$null
-                [Net.IPAddress]::TryParse($_,[ref]$parsed) -and $parsed.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork
-            } | Select-Object -First 1))
+            $selection=Select-LanIPv4 @($adapters) @($activeAdapters)
+            $result.PrimaryIPv4=[string]$selection.Address
+            if (-not $result.PrimaryIPv4) { $result.Errors+="IPv4: $($selection.Reason)" }
         } catch { $result.Errors+="IP: $($_.Exception.Message)" }
         $rdpAddresses=@(Read-RdpConnection)
         $result.Addresses=@(@($result.Addresses) + @($rdpAddresses) | Select-Object -Unique)
@@ -241,7 +251,34 @@ try {
         $result.Errors+=@($officeErrors); $result.Completed=$true; $result.Code=0
         ConvertTo-Json -InputObject $result -Depth 18 -Compress
         return
+
+}
+try {
+    Assert-RemotingContext
+    $r = $RequestJson | ConvertFrom-Json
+    $allowed = @('Action','Computer','LocalMachineId','SessionId','User','Domain','Sid','MachineId','Versions','CloseOutlook','BackupId','OperationId','ClientIPv4')
+    foreach ($p in $r.PSObject.Properties.Name) { if ($p -notin $allowed) { throw "Неизвестный параметр: $p" } }
+    $policy=Get-RequestPolicy ([string]$r.Action)
+    if ($policy.RequiresSession -and [int]$r.SessionId -le 0) { throw 'Некорректный ID сеанса.' }
+    $machine=Get-RemoteMachineIdentity ([string]$r.LocalMachineId)
+    $result.OperationId=if ($r.Action -eq 'Restore') { [string]$r.BackupId } else { [string]$r.OperationId }
+    $result.MachineId=$machine
+    if ($policy.RequiresPinnedMachine -and $machine -ne $r.MachineId) { throw 'Изменилась идентичность целевого компьютера. Откройте диалог заново.' }
+    if ($r.Action -eq 'SystemInfo') {
+        $result.SystemInfo=Get-SystemInformation
+        foreach ($messages in $result.SystemInfo.SectionErrors.Values) { $result.Errors+=@($messages | Where-Object {$_}) }
+        $result.Code=0; $result.Completed=$true
+        $result.Message=if ($result.Errors.Count -eq 0) {'Сведения прочитаны.'} else {'Часть сведений недоступна. См. ошибки разделов.'}
+        ConvertTo-Json -InputObject $result -Depth 18 -Compress
+        return
     }
+    if ($r.Action -eq 'ConnectionInfo') {
+        $result.Addresses=@(Read-RdpConnection)
+        $result.Code=0; $result.Completed=$true
+        ConvertTo-Json -InputObject $result -Depth 18 -Compress
+        return
+    }
+    if ($r.Action -eq 'ComputerInfo') { Get-ComputerInformation; return }
     if (-not ('RsmNative' -as [type])) { Add-Type -TypeDefinition @'
 using System;
 using System.IO;

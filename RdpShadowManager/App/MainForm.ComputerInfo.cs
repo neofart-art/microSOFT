@@ -60,6 +60,7 @@ internal sealed partial class MainForm
     }
     private void ClearComputerInfo()
     {
+        ShowHardwareSummary(null);
         infoGeneration++; rdpPolling?.Cancel(); currentRemoteAddresses = []; infoCancellation?.Cancel(); infoAvailable = false; infoRefresh.Enabled = false;
         SetComputerDetails("", "Получите сеансы выбранного компьютера.", "", ""); ipCaption.Text = "IPv4"; infoTips.SetToolTip(infoAddresses, "");
     }
@@ -101,6 +102,7 @@ internal sealed partial class MainForm
             SetComputerDetails(computer + (data?.Computer.Length > 0 && !string.Equals(computer, data.Computer, StringComparison.OrdinalIgnoreCase) ? $" ({data.Computer})" : ""),
                 "", Known(data?.Windows) + Environment.NewLine + Known(data?.WindowsVersion), officeText.Replace("\n", Environment.NewLine));
             ShowComputerIPv4(selectedIPv4);
+            ShowHardwareSummary(data?.SystemInfo);
 
         }
         catch (OperationCanceledException) { }

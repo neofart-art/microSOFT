@@ -10,7 +10,7 @@ function Assert($value,[string]$message) { if (-not $value) { throw $message }; 
 # A direct invocation must stop before any registry or process access.
 $guard=& ([ScriptBlock]::Create($source)) '{"Action":"Inspect"}' | ConvertFrom-Json
 Assert ($guard.Code -ne 0 -and $guard.Message -match 'WinRM') 'Local invocation must fail closed'
-foreach ($name in @('New-Plan','Read-Value','Write-Value','Same-Value','Save-Backup','Restore-Conflict','Resolve-OutlookVersions','Assert-AutomaticVersions','Normalize-IPv4','Find-RdpIPv4','Get-SystemInformation')) {
+foreach ($name in @('New-Plan','Read-Value','Write-Value','Same-Value','Save-Backup','Restore-Conflict','Resolve-OutlookVersions','Assert-AutomaticVersions','Normalize-IPv4','Find-RdpIPv4','Get-SystemInformation','Get-RequestPolicy','Get-AdapterValue','Select-LanIPv4')) {
     $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
     if (-not $node) { throw "Missing function: $name" }
     . ([ScriptBlock]::Create($node.Extent.Text))
@@ -54,33 +54,23 @@ function Read-SystemCim([string]$class,[string[]]$properties,[string]$namespace=
         'Win32_BIOS' { return @(@{SerialNumber='TEST-SERIAL'}) }
         'Win32_Processor' { return @(@{Name='Test CPU';NumberOfCores=4;NumberOfLogicalProcessors=8;LoadPercentage=25}) }
         'Win32_LogicalDisk' { return @(@{DeviceID='C:';DriveType=3;FileSystem='NTFS';Size=107374182400;FreeSpace=53687091200},@{DeviceID='Z:';DriveType=4;FileSystem='NTFS';Size=1;FreeSpace=1}) }
-        'Win32_EncryptableVolume' { return @(@{DriveLetter='C:';ProtectionStatus=1}) }
         'Win32_QuickFixEngineering' { return @(@{HotFixID='KB-TEST';Description='Test';InstalledOn='2026-11-08'}) }
         default { throw "Unexpected CIM query: $class" }
     }
 }
 function Get-PhysicalDisk { return @(@{FriendlyName='Test SSD';HealthStatus='Healthy';OperationalStatus=@('OK');Size=107374182400}) }
-function Invoke-CimMethod($InputObject,[string]$MethodName,$OperationTimeoutSec,$ErrorAction) {
-    if ($MethodName -eq 'GetConversionStatus') { return @{ReturnValue=0;ConversionStatus=1;EncryptionPercentage=100} }
-    if ($MethodName -eq 'GetLockStatus') { return @{ReturnValue=0;LockStatus=0} }
-    throw 'Mutating or unknown BitLocker method forbidden'
-}
 function Read-RestartIndicators { return @{Pending=$true;Reasons=@('Windows Update test marker')} }
 $watch=[Diagnostics.Stopwatch]::StartNew()
 $inventory=Get-SystemInformation
-Assert ($inventory.Sections.Count -eq 7 -and @($inventory.Sections.Values | Where-Object {$_ -ne 'ok'}).Count -eq 0) 'All requested inventory sections collected'
+Assert ($inventory.Sections.Count -eq 6 -and @($inventory.Sections.Values | Where-Object {$_ -ne 'ok'}).Count -eq 0) 'All requested inventory sections collected'
 Assert ($inventory.Model -eq 'Synthetic PC' -and $inventory.SerialNumber -eq 'TEST-SERIAL') 'Model and serial preserved'
 Assert ($inventory.UptimeSeconds -ge 86300 -and $inventory.LastBoot -match 'Z$') 'Boot and uptime based on remote OS'
 Assert ($inventory.InstalledRamBytes -eq 17179869184 -and $inventory.FreeRamBytes -eq 8589934592) 'Memory units converted from KiB'
 Assert ($inventory.Cpus[0].LoadPercent -eq 25 -and $inventory.Cpus[0].LogicalProcessors -eq 8) 'CPU topology and load'
 Assert ($inventory.Volumes.Count -eq 1 -and $inventory.Volumes[0].Drive -eq 'C:') 'Network shares are not inventoried as local disks'
 Assert ($inventory.PhysicalDisks[0].Health -eq 'Healthy') 'Storage health read'
-Assert ($inventory.BitLocker[0].ProtectionStatus -eq 1 -and $inventory.BitLocker[0].EncryptionPercent -eq 100) 'Only BitLocker state'
 Assert ($inventory.Updates[0].Id -eq 'KB-TEST' -and $inventory.RebootPending) 'Recent QFE update and pending restart'
-$allowedMethods=@('GetConversionStatus','GetLockStatus')
-$methodCalls=$ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-CimMethod'},$true)
-Assert ($methodCalls.Count -eq 2) 'Only two status-getter BitLocker calls exist'
-Assert ($source -notmatch '(?i)Get-BitLockerVolume|GetKeyProtectorNumericalPassword|GetKeyProtectors|GetConversionStatus\s+-Arguments') 'No protectors/recovery keys or mutation arguments requested'
+Assert ($source -notmatch '(?i)BitLocker|Win32_EncryptableVolume|Invoke-CimMethod') 'BitLocker and all its requests are completely removed'
 function Get-PhysicalDisk { throw 'Storage access denied (fixture)' }
 $partial=Get-SystemInformation
 Assert ($partial.Sections.physical -eq 'error' -and $partial.Model -eq 'Synthetic PC' -and $partial.Updates.Count -eq 1) 'Unavailable storage does not discard other sections'
@@ -88,7 +78,50 @@ Assert (($partial.SectionErrors.physical -join ' ') -match 'access denied') 'Par
 function Read-RestartIndicators { throw 'Registry access denied (fixture)' }
 $unknown=Get-SystemInformation
 Assert ($null -eq $unknown.RebootPending -and $unknown.Sections.restart -eq 'error') 'Unknown restart state is not false'
-Remove-Item Function:\Read-SystemCim,Function:\Get-PhysicalDisk,Function:\Invoke-CimMethod,Function:\Read-RestartIndicators
+Remove-Item Function:\Read-SystemCim,Function:\Get-PhysicalDisk,Function:\Read-RestartIndicators
+# Adapter fixture mirrors the user's screenshot. Radmin can falsely report PhysicalAdapter=true.
+$adapters=@(
+ @{InterfaceIndex=1;IPAddress=@('26.209.222.170');DefaultIPGateway=@('26.0.0.1');IPConnectionMetric=1},
+ @{InterfaceIndex=2;IPAddress=@('172.31.1.11');DefaultIPGateway=@('fe80::1','172.31.0.181');IPConnectionMetric=20}
+)
+$metadata=@(
+ @{InterfaceIndex=1;Name='Radmin VPN';Description='Radmin VPN';NetConnectionID='Radmin VPN';ServiceName='Radmin';PNPDeviceID='ROOT\RADMIN';PhysicalAdapter=$true},
+ @{InterfaceIndex=2;Name='Intel Ethernet';Description='Intel Ethernet';NetConnectionID='Ethernet';ServiceName='e1d';PNPDeviceID='PCI\VEN_8086';PhysicalAdapter=$true}
+)
+Assert ((Select-LanIPv4 $adapters $metadata).Address -eq '172.31.1.11') 'LAN fallback rejects Radmin even with lower metric and PhysicalAdapter=true'
+Assert ((Select-LanIPv4 @($adapters[0]) @($metadata[0])).Address -eq '') 'VPN-only interface is not guessed as main LAN'
+$duplicate=@{InterfaceIndex=3;IPAddress=@('172.31.2.11');DefaultIPGateway=@('172.31.2.1');IPConnectionMetric=20}
+$duplicateMeta=@{InterfaceIndex=3;Name='Intel Ethernet 2';Description='Intel';NetConnectionID='Ethernet 2';ServiceName='e1d';PNPDeviceID='PCI\VEN_8086';PhysicalAdapter=$true}
+Assert ((Select-LanIPv4 @($adapters[1],$duplicate) @($metadata[1],$duplicateMeta)).Address -eq '') 'Equal LAN choices remain ambiguous'
+# Exercise the FULL helper entry point, replacing external providers in test-only script text.
+$stubs=@{
+ 'Assert-RemotingContext'='function Assert-RemotingContext {}'
+ 'Get-RemoteMachineIdentity'='function Get-RemoteMachineIdentity([string]$localMachineId) { return "REMOTE-GUID" }'
+ 'Get-SystemInformation'='function Get-SystemInformation { return @{Sections=@{computer="ok"};SectionErrors=@{};Model="ENTRY-TEST"} }'
+ 'Get-ComputerInformation'='function Get-ComputerInformation { $result.Windows="ENTRY-TEST"; $result.PrimaryIPv4="172.31.1.11"; $result.Addresses=@("172.31.1.11"); $result.Code=0; $result.Completed=$true; ConvertTo-Json -InputObject $result -Depth 18 -Compress }'
+ 'Read-RdpConnection'='function Read-RdpConnection { $result.RdpIPv4="172.31.1.11"; return @("172.31.1.11") }'
+}
+$entry=$source
+$nodes=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $stubs.ContainsKey($n.Name)},$true) | Sort-Object {$_.Extent.StartOffset} -Descending)
+Assert ($nodes.Count -eq $stubs.Count) 'Test stubs cover only explicit external provider boundaries'
+foreach ($node in $nodes) { $entry=$entry.Substring(0,$node.Extent.StartOffset)+$stubs[$node.Name]+$entry.Substring($node.Extent.EndOffset) }
+foreach ($action in @('SystemInfo','ComputerInfo','ConnectionInfo')) {
+ $request=@{Action=$action;Computer='TEST-PC';LocalMachineId='LOCAL-GUID';SessionId=0;User='';Domain='';Sid='';MachineId='';Versions=@();CloseOutlook=$false;BackupId='';OperationId='';ClientIPv4=@('172.31.1.99')}
+ $reply=& ([scriptblock]::Create($entry)) (ConvertTo-Json -InputObject $request -Compress) | ConvertFrom-Json
+ Assert ($reply.Code -eq 0 -and $reply.Completed) "$action entry accepts SessionId=0 and no prior pinned MachineId"
+ if ($action -eq 'SystemInfo') { Assert ($reply.SystemInfo.Model -eq 'ENTRY-TEST') 'SystemInfo reaches its collector through real dispatcher' }
+}
+foreach ($action in @('Inspect','Apply','RestorePreview','Restore')) {
+ $request=@{Action=$action;Computer='TEST-PC';LocalMachineId='LOCAL-GUID';SessionId=0;User='';Domain='';Sid='';MachineId='';Versions=@();CloseOutlook=$false;BackupId='';OperationId='';ClientIPv4=@()}
+ $reply=& ([scriptblock]::Create($entry)) (ConvertTo-Json -InputObject $request -Compress) | ConvertFrom-Json
+ Assert ($reply.Code -ne 0 -and $reply.Message -match 'ID') "$action still rejects missing user session"
+}
+$request.Action='Apply';$request.SessionId=1;$request.MachineId='WRONG-GUID'
+$reply=& ([scriptblock]::Create($entry)) (ConvertTo-Json -InputObject $request -Compress) | ConvertFrom-Json
+Assert ($reply.Code -ne 0 -and $reply.Message -match 'идентичность') 'Mutation still checks pinned machine identity before native calls'
+$request.Action='Unknown'
+$reply=& ([scriptblock]::Create($entry)) (ConvertTo-Json -InputObject $request -Compress) | ConvertFrom-Json
+Assert ($reply.Code -ne 0 -and $reply.Message -match 'Неизвестная') 'Unknown action rejected by real dispatcher'
 $native=$ast.Find({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Type'},$true)
 . ([ScriptBlock]::Create($native.Extent.Text))
 Assert ($null -ne ('RsmNative' -as [type])) 'Native WTS and token-check code compiles'
