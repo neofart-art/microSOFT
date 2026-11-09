@@ -5,18 +5,18 @@ using RdpShadowManager.Core;
 namespace RdpShadowManager;
 internal sealed partial class MainForm
 {
-    private readonly Button restartComputer = new() { Text = "Перезагрузить", AutoSize = true, MinimumSize = new(120, 34) };
-    private readonly Button shutdownComputer = new() { Text = "Выключить", AutoSize = true, MinimumSize = new(100, 34) };
-    private readonly Button abortPower = new() { Text = "Отменить действие", AutoSize = true, MinimumSize = new(140, 34) };
+    private readonly Button restartComputer = new() { Text = "Перезагрузить", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new(120, 34) };
+    private readonly Button shutdownComputer = new() { Text = "Выключить", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new(100, 34) };
+    private readonly Button abortPower = new() { Text = "Отменить действие", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new(140, 34) };
     private readonly Label powerTarget = new() { AutoSize = true, MaximumSize = new(352, 0) };
     private bool powering;
     private GroupBox BuildPowerGroup()
     {
-        var group = new GroupBox { Text = "Питание удалённого компьютера", Dock = DockStyle.Top, AutoSize = true, Padding = new(8), Margin = new(0,12,0,0) };
-        var controls = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, RowCount = 2 };
+        var group = new GroupBox { Text = "Питание удалённого компьютера", Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new(8), Margin = new(0,12,0,0) };
+        var controls = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, RowCount = 2 };
         controls.ColumnStyles.Add(new(SizeType.Percent, 100));
         controls.RowStyles.Add(new(SizeType.AutoSize)); controls.RowStyles.Add(new(SizeType.AutoSize));
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true, Margin = Padding.Empty };
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, Margin = Padding.Empty };
         buttons.Controls.AddRange([restartComputer, shutdownComputer, abortPower]);
         controls.Controls.Add(powerTarget, 0, 0); controls.Controls.Add(buttons, 0, 1); group.Controls.Add(controls);
         restartComputer.Click += async (_,_) => await SendPower(PowerAction.Restart);

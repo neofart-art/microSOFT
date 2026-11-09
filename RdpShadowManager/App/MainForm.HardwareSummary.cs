@@ -4,8 +4,8 @@ internal sealed partial class MainForm
     private readonly Dictionary<string, TextBox> hardwareFields = [];
     private Control BuildHardwareSummary()
     {
-        var group = new GroupBox { Text = "Компьютер и время работы", Dock = DockStyle.Top, AutoSize = true, Padding = new(6) };
-        var rows = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2 };
+        var group = new GroupBox { Text = "Компьютер и время работы", Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new(6) };
+        var rows = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2 };
         rows.ColumnStyles.Add(new(SizeType.Absolute, 145)); rows.ColumnStyles.Add(new(SizeType.Percent, 100));
         foreach (var (key, caption, height) in new[] { ("boot","Загрузка Windows",32),("uptime","Время работы",24),("model","Модель ПК",32),("serial","Серийный номер",24),("cpu","CPU",44),("ram","ОЗУ",24) })
         {

@@ -10,7 +10,7 @@ internal sealed partial class MainForm
     private readonly TextBox infoWindows = InfoField(54);
     private readonly TextBox infoOffice = InfoField(90);
     private readonly Label ipCaption = new() { Text = "IPv4", AutoSize = true };
-    private readonly Button infoRefresh = new() { Text = "↻", AccessibleName = "Обновить сведения о ПК", AutoSize = true, Enabled = false };
+    private readonly Button infoRefresh = new() { Text = "↻", AccessibleName = "Обновить сведения о ПК", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Enabled = false };
     private readonly ToolTip infoTips = new() { AutoPopDelay = 30000 };
     private CancellationTokenSource? infoCancellation;
     private long infoGeneration;
@@ -20,13 +20,13 @@ internal sealed partial class MainForm
     internal Func<string, CancellationToken, Task<IPAddress[]>> InfoDns = (computer, token) => Dns.GetHostAddressesAsync(computer, token);
     private Control BuildComputerInfo()
     {
-        var group = new GroupBox { Text = "Сведения о ПК", Dock = DockStyle.Top, AutoSize = true, Padding = new(6) };
-        var rows = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 4 };
+        var group = new GroupBox { Text = "Сведения о ПК", Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new(6) };
+        var rows = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 4 };
         rows.ColumnStyles.Add(new(SizeType.Percent, 50)); rows.ColumnStyles.Add(new(SizeType.Percent, 50));
         for (int i = 0; i < 4; i++) rows.RowStyles.Add(new(SizeType.AutoSize));
         Control Field(Control caption, TextBox value)
         {
-            var panel = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, RowCount = 2, Margin = new(3, 4, 3, 4) };
+            var panel = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, RowCount = 2, Margin = new(3, 4, 3, 4) };
             panel.ColumnStyles.Add(new(SizeType.Percent, 100));
             panel.RowStyles.Add(new(SizeType.AutoSize)); panel.RowStyles.Add(new(SizeType.AutoSize));
             panel.Controls.Add(caption, 0, 0); panel.Controls.Add(value, 0, 1);
