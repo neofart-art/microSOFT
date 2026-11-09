@@ -42,7 +42,7 @@ internal static class RdpConnections
             for (int i = 0; i < count; i++)
             {
                 var row = IntPtr.Add(buffer, 4 + i * 24);
-                if (Marshal.ReadInt32(row) != 5) continue; // MIB_TCP_STATE_ESTAB only
+                if (!ComputerIPv4.IsEstablishedRdpEndpoint(Marshal.ReadInt32(row), Marshal.ReadInt32(row, 16))) continue; // Established target RDP, not a gateway HTTPS connection
                 var address = new IPAddress(BitConverter.GetBytes(Marshal.ReadInt32(row, 12))).ToString();
                 if (allowed.Contains(address)) endpoints.Add((Marshal.ReadInt32(row, 20), address));
             }

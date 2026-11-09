@@ -22,6 +22,9 @@ internal static class DiagnosticsIPv4Tests
         Check(PowerShellDiagnostics.Analyze("#< CLIXML\n<Objs><S S=\"Error\">failure</S>").Errors.Length == 1, "Malformed XML cannot hide errors");
         Check(PowerShellDiagnostics.Analyze("#< CLIXML\n<Objs><S S=\"unknown\">text</S></Objs>").Errors.Length == 1, "Unknown streams fail conservatively");
         Check(PowerShellDiagnostics.Analyze("#< CLIXML\n<Objs><S S=\"warning\">Registry error in warning text</S></Objs>").Errors.Length == 0, "Declared warning stream is nonfatal, not classified by keywords");
+        Check(ComputerIPv4.IsEstablishedRdpEndpoint(5, 0x3d0d), "Native network-order port 3389 is recognized");
+        Check(!ComputerIPv4.IsEstablishedRdpEndpoint(5, 0xbb01), "Gateway HTTPS port 443 is not the target PC RDP endpoint");
+        Check(!ComputerIPv4.IsEstablishedRdpEndpoint(2, 0x3d0d), "Pending TCP connection is not established");
         var selected = ComputerIPv4.Select("172.31.1.11", "10.8.0.2", ["10.8.0.2", "172.31.1.11", "2001:db8::1"]);
         Check(selected.Address == "172.31.1.11" && selected.Source.Contains("TCP"), "Observed connection IPv4 takes priority over VPN/primary");
         Check(ComputerIPv4.Select(null, "172.31.1.11", ["10.8.0.2"]).Address == "172.31.1.11", "Fallback uses remote primary");

@@ -60,7 +60,7 @@ internal static class UiSmoke
         var infoChecks = MainForm.CheckComputerInfoStates();
         while (!infoChecks.IsCompleted) { Application.DoEvents(); Thread.Sleep(10); }
         infoChecks.GetAwaiter().GetResult();
-        checks.Add("PASS: remote info unavailable, no Office, multiple IPs, DNS label, refresh, stale response after host change, and verified/partial/error/unconfirmed AutoDiscover outcomes");
+        checks.Add("PASS: single connected/fallback IPv4, no IPv6 or DNS guesses, field copy, stale responses, and 0 changed/36 matching/service-stderr current status without a modal");
         MainForm.CheckHiddenPowerShell();
         checks.Add("PASS: real hidden Windows PowerShell process reports GetConsoleWindow=0; no console was allocated");
         PowerSmoke.Run(output);
