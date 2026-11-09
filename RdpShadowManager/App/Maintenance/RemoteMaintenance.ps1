@@ -151,7 +151,7 @@ function Get-RemoteMachineIdentity([string]$localMachineId) {
     if (-not ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Нужны административные права на удалённом компьютере.' }
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)
     try { $k=$base.OpenSubKey('SOFTWARE\Microsoft\Cryptography'); try { $machine=[string]$k.GetValue('MachineGuid') } finally { if ($k) { $k.Dispose() } } } finally { $base.Dispose() }
-    if (-not $machine -or -not $localMachineId -or $machine -eq $r.LocalMachineId) { throw 'Локальный компьютер администратора исключён из обслуживания (MachineGuid совпадает или недоступен).' }
+    if (-not $machine -or -not $localMachineId -or $machine -eq $localMachineId) { throw 'Локальный компьютер администратора исключён из обслуживания (MachineGuid совпадает или недоступен).' }
     return $machine
 }
 function Get-AdapterValue($item,[string]$name) {

@@ -1,4 +1,4 @@
-$ErrorActionPreference='Stop'
+﻿$ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $sourcePath=Join-Path $PSScriptRoot '../App/Maintenance/RemoteMaintenance.ps1'
 $source=[IO.File]::ReadAllText((Resolve-Path $sourcePath),[Text.Encoding]::UTF8)

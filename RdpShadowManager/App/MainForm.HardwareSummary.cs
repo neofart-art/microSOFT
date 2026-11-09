@@ -26,7 +26,7 @@ internal sealed partial class MainForm
         hardwareFields["uptime"].Text = SystemInfoDialog.Uptime(data?.UptimeSeconds);
         hardwareFields["model"].Text = Known(data?.Model);
         hardwareFields["serial"].Text = Known(data?.SerialNumber);
-        hardwareFields["cpu"].Text = data?.Cpus.Length > 0 ? string.Join(Environment.NewLine, data.Cpus.Select(c => c.Name)) : "Не удалось определить";
+        hardwareFields["cpu"].Text = data?.Cpus.Length > 0 ? string.Join(Environment.NewLine, data.Cpus.Select(c => Known(c.Name))) : "Не удалось определить";
         hardwareFields["ram"].Text = SystemInfoDialog.Bytes(data?.InstalledRamBytes);
     }
 }
