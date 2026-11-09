@@ -6,13 +6,12 @@ internal sealed partial class MainForm
     {
         var group = new GroupBox { Text = "Компьютер и время работы", Dock = DockStyle.Top, AutoSize = true, Padding = new(6) };
         var rows = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2 };
-        rows.ColumnStyles.Add(new(SizeType.Absolute, 110)); rows.ColumnStyles.Add(new(SizeType.Percent, 100));
+        rows.ColumnStyles.Add(new(SizeType.Absolute, 145)); rows.ColumnStyles.Add(new(SizeType.Percent, 100));
         foreach (var (key, caption, height) in new[] { ("boot","Загрузка Windows",32),("uptime","Время работы",24),("model","Модель ПК",32),("serial","Серийный номер",24),("cpu","CPU",44),("ram","ОЗУ",24) })
         {
             int row = rows.RowCount++;
-            var field = new TextBox { ReadOnly = true, Multiline = true, WordWrap = true, ShortcutsEnabled = true, ScrollBars = ScrollBars.Vertical,
-                Dock = DockStyle.Fill, Height = height, MinimumSize = new(40,height), Text = "Не удалось определить", BackColor = SystemColors.Window };
-            rows.RowStyles.Add(new(SizeType.Absolute, height+6));
+            var field = new ReadableInfoField { Text = "Не удалось определить" };
+            rows.RowStyles.Add(new(SizeType.AutoSize));
             rows.Controls.Add(new Label { Text = caption, AutoSize = true, Dock = DockStyle.Fill }, 0, row);
             rows.Controls.Add(field, 1, row); hardwareFields[key] = field;
         }

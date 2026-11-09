@@ -5,14 +5,14 @@ using RdpShadowManager.Core;
 namespace RdpShadowManager;
 internal sealed partial class MainForm
 {
-    private readonly Button restartComputer = new() { Text = "Перезагрузить", Width = 100, Height = 32 };
-    private readonly Button shutdownComputer = new() { Text = "Выключить", Width = 90, Height = 32 };
-    private readonly Button abortPower = new() { Text = "Отменить действие", Width = 120, Height = 32 };
+    private readonly Button restartComputer = new() { Text = "Перезагрузить", AutoSize = true, MinimumSize = new(120, 34) };
+    private readonly Button shutdownComputer = new() { Text = "Выключить", AutoSize = true, MinimumSize = new(100, 34) };
+    private readonly Button abortPower = new() { Text = "Отменить действие", AutoSize = true, MinimumSize = new(140, 34) };
     private readonly Label powerTarget = new() { AutoSize = true, MaximumSize = new(352, 0) };
     private bool powering;
     private GroupBox BuildPowerGroup()
     {
-        var group = new GroupBox { Text = "Питание удалённого компьютера", Dock = DockStyle.Fill, AutoSize = true, Padding = new(8), Margin = new(0,12,0,0) };
+        var group = new GroupBox { Text = "Питание удалённого компьютера", Dock = DockStyle.Top, AutoSize = true, Padding = new(8), Margin = new(0,12,0,0) };
         var controls = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, RowCount = 2 };
         controls.ColumnStyles.Add(new(SizeType.Percent, 100));
         controls.RowStyles.Add(new(SizeType.AutoSize)); controls.RowStyles.Add(new(SizeType.AutoSize));

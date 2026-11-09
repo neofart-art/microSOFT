@@ -51,6 +51,7 @@ internal sealed partial class MainForm
         foreach (var field in new[] { form.infoComputer, form.infoAddresses, form.infoWindows, form.infoOffice }.Concat(form.hardwareFields.Values))
         {
             Check(field.ReadOnly && field.ShortcutsEnabled && field.WordWrap && field.Multiline, "Info values must be read-only, selectable and wrapped");
+            Check(field.ScrollBars == ScrollBars.None && field is ReadableInfoField readable && field.Height >= readable.RequiredHeight(), "Complete field must fit without internal scrolling");
             field.Focus(); field.SelectAll(); field.Copy();
             if (field.Text.Length > 0) Check(Clipboard.GetText() == field.Text, "Separate field Ctrl+C copy failed");
         }

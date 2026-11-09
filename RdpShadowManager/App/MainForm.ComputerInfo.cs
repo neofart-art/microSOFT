@@ -4,7 +4,7 @@ using RdpShadowManager.Core;
 namespace RdpShadowManager;
 internal sealed partial class MainForm
 {
-    private static TextBox InfoField(int height) => new() { ReadOnly = true, Multiline = true, WordWrap = true, ScrollBars = ScrollBars.Vertical, ShortcutsEnabled = true, Dock = DockStyle.Fill, Height = height, MinimumSize = new(40, height), BackColor = SystemColors.Window };
+    private static TextBox InfoField(int height) => new ReadableInfoField();
     private readonly TextBox infoComputer = InfoField(60);
     private readonly TextBox infoAddresses = InfoField(60);
     private readonly TextBox infoWindows = InfoField(54);
@@ -28,7 +28,7 @@ internal sealed partial class MainForm
         {
             var panel = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, RowCount = 2, Margin = new(3, 4, 3, 4) };
             panel.ColumnStyles.Add(new(SizeType.Percent, 100));
-            panel.RowStyles.Add(new(SizeType.AutoSize)); panel.RowStyles.Add(new(SizeType.Absolute, value.Height));
+            panel.RowStyles.Add(new(SizeType.AutoSize)); panel.RowStyles.Add(new(SizeType.AutoSize));
             panel.Controls.Add(caption, 0, 0); panel.Controls.Add(value, 0, 1);
             return panel;
         }

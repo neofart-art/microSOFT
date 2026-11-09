@@ -35,12 +35,12 @@ internal sealed partial class MainForm : Form
         using (var iconStream = typeof(MainForm).Assembly.GetManifestResourceStream("RdpShadowManager.Resources.app.ico")!)
             Icon = new Icon(iconStream, 256, 256);
         ShowIcon = true; ShowInTaskbar = true;
-        ClientSize = new(1174, 880); MinimumSize = new(1104, 740);
+        ClientSize = new(1440, 1000); MinimumSize = new(1280, 800);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Padding = new(12), Margin = Padding.Empty };
         layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.Percent, 100));
         for (int i=2;i<9;i++) layout.RowStyles.Add(new(SizeType.AutoSize));
         var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-        shell.ColumnStyles.Add(new(SizeType.Percent, 100)); shell.ColumnStyles.Add(new(SizeType.Absolute, 400));
+        shell.ColumnStyles.Add(new(SizeType.Percent, 100)); shell.ColumnStyles.Add(new(SizeType.Absolute, 500));
         shell.RowStyles.Add(new(SizeType.Percent, 100));
         Controls.Add(shell); shell.Controls.Add(layout, 0, 0);
         var art = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, AutoScroll = true, Padding = new(12), Margin = Padding.Empty };
