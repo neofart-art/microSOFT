@@ -9,7 +9,7 @@ internal sealed partial class MainForm
     private readonly TextBox infoAddresses = InfoField(60);
     private readonly TextBox infoWindows = InfoField(54);
     private readonly TextBox infoOffice = InfoField(90);
-    private readonly Label ipCaption = new() { Text = "IP-адреса", AutoSize = true };
+    private readonly Label ipCaption = new() { Text = "IPv4", AutoSize = true };
     private readonly Button infoRefresh = new() { Text = "↻", AccessibleName = "Обновить сведения о ПК", AutoSize = true, Enabled = false };
     private readonly ToolTip infoTips = new() { AutoPopDelay = 30000 };
     private CancellationTokenSource? infoCancellation;
@@ -49,10 +49,16 @@ internal sealed partial class MainForm
         infoComputer.Text = computer; infoAddresses.Text = addresses;
         infoWindows.Text = windows; infoOffice.Text = office;
     }
+    private void ShowComputerIPv4(IPv4Choice choice)
+    {
+        infoAddresses.Text = choice.Address.Length > 0 ? "IPv4: " + choice.Address : "IPv4: Не удалось определить";
+        ipCaption.Text = "IPv4";
+        infoTips.SetToolTip(infoAddresses, choice.Source);
+    }
     private void ClearComputerInfo()
     {
-        infoGeneration++; infoCancellation?.Cancel(); infoAvailable = false; infoRefresh.Enabled = false;
-        SetComputerDetails("", "Получите сеансы выбранного компьютера.", "", ""); ipCaption.Text = "IP-адреса"; infoTips.SetToolTip(infoAddresses, "");
+        infoGeneration++; rdpPolling?.Cancel(); currentRemoteAddresses = []; infoCancellation?.Cancel(); infoAvailable = false; infoRefresh.Enabled = false;
+        SetComputerDetails("", "Получите сеансы выбранного компьютера.", "", ""); ipCaption.Text = "IPv4"; infoTips.SetToolTip(infoAddresses, "");
     }
     private async Task LoadComputerInfo()
     {
@@ -72,34 +78,31 @@ internal sealed partial class MainForm
                 var reply = await InfoQuery(computer, cancellation.Token);
                 if (!Current()) return;
                 Trace("Сведения о ПК / WinRM", computer, reply.Result.Report(), reply.ExitCode);
-                if (reply.StandardError.Length > 0) Trace("Сведения о ПК / stderr", computer, reply.StandardError, reply.ExitCode);
+                TracePowerShellStreams("Сведения о ПК", computer, reply.StandardError, reply.ExitCode);
                 if (reply.ExitCode == 0 && reply.Result.Completed) data = reply.Result;
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { if (Current()) Trace("Сведения о ПК", computer, ex.ToString(), ex.HResult); }
             if (!Current()) return;
-            var addresses = data?.Addresses ?? [];
-            string ipLabel = "IP";
-            if (addresses.Length == 0)
-            {
-                try
-                {
-                    addresses = (await InfoDns(computer, cancellation.Token)).Select(a => a.ToString()).Distinct().ToArray();
-                    ipLabel = IPAddress.TryParse(computer, out _) ? "IP из адреса" : "IP по DNS";
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex) { if (Current()) Trace("Сведения о ПК / DNS", computer, ex.Message, ex.HResult); }
-            }
+            currentRemoteAddresses = data?.Addresses ?? [];
+            string[] dns = [];
+            try { dns = (await InfoDns(computer, cancellation.Token)).Select(a => a.ToString()).ToArray(); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { if (Current()) Trace("IPv4 / DNS", computer, ex.Message, ex.HResult); }
+            if (!Current()) return;
+            string? connected = null;
+            try { connected = await InfoConnectedIPv4(computer, ComputerIPv4.Addresses(currentRemoteAddresses.Concat(dns)), cancellation.Token); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { if (Current()) Trace("IPv4 подключения", computer, ex.Message, ex.HResult); }
+            var selectedIPv4 = ComputerIPv4.Select(connected, data?.PrimaryIPv4, currentRemoteAddresses);
             if (!Current()) return;
             string Known(string? value) => string.IsNullOrWhiteSpace(value) ? "Не удалось определить" : value;
             var office = data?.Office ?? [];
             var officeText = office.Length > 0 ? string.Join("\n", office) + (data!.OfficeKnown ? "" : "\nНе удалось определить остальные продукты")
                 : data?.OfficeKnown == true ? "Office не установлен" : "Не удалось определить";
             SetComputerDetails(computer + (data?.Computer.Length > 0 && !string.Equals(computer, data.Computer, StringComparison.OrdinalIgnoreCase) ? $" ({data.Computer})" : ""),
-                addresses.Length > 0 ? string.Join(Environment.NewLine, addresses) : "Не удалось определить",
-                Known(data?.Windows) + Environment.NewLine + Known(data?.WindowsVersion), officeText.Replace("\n", Environment.NewLine));
-            ipCaption.Text = ipLabel == "IP" ? "IP-адреса" : $"IP-адреса ({ipLabel.Replace("IP ", "")})";
-            infoTips.SetToolTip(infoAddresses, addresses.Length == 0 ? "IP не определён" : ipLabel);
+                "", Known(data?.Windows) + Environment.NewLine + Known(data?.WindowsVersion), officeText.Replace("\n", Environment.NewLine));
+            ShowComputerIPv4(selectedIPv4);
 
         }
         catch (OperationCanceledException) { }

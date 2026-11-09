@@ -30,6 +30,7 @@ internal sealed partial class MainForm : Form
     public MainForm(StartupState? restored = null, AddressHistoryStore? history = null)
     {
         addressHistory = history ?? new AddressHistoryStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RdpShadowManager", "address-history.json"));
+        InfoConnectedIPv4 = ReadConnectedIPv4;
         Text = "RDP Shadow Manager"; AutoScaleMode = AutoScaleMode.Dpi; AutoScaleDimensions = new(96, 96);
         using (var iconStream = typeof(MainForm).Assembly.GetManifestResourceStream("RdpShadowManager.Resources.app.ico")!)
             Icon = new Icon(iconStream, 256, 256);
@@ -49,7 +50,7 @@ internal sealed partial class MainForm : Form
         using var sourceImage = Image.FromStream(imageStream);
         var mascot = new PictureBox { Image = new Bitmap(sourceImage), SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.None, Anchor = AnchorStyles.Top | AnchorStyles.Right, Size = new(200, 160), Margin = Padding.Empty, AccessibleName = "Персонаж Outlook", TabStop = false };
         art.Controls.Add(mascot, 0, 0); art.Controls.Add(BuildComputerInfo(), 0, 1); art.Controls.Add(BuildPowerGroup(), 0, 2); shell.Controls.Add(art, 1, 0);
-        FormClosed += (_,_) => { infoCancellation?.Cancel(); infoTips.Dispose(); mascot.Image?.Dispose(); Icon?.Dispose(); };
+        FormClosed += (_,_) => { rdpPolling?.Cancel(); infoCancellation?.Cancel(); infoTips.Dispose(); mascot.Image?.Dispose(); Icon?.Dispose(); };
         FlowLayoutPanel Row(params Control[] controls)
         {
             var row = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
@@ -198,6 +199,7 @@ internal sealed partial class MainForm : Form
                 var start = new ProcessStartInfo(executable) { UseShellExecute = false };
                 foreach (var arg in Connection.Arguments(computer, actual.Id, noPrompt)) start.ArgumentList.Add(arg);
                 using var client = Process.Start(start) ?? throw new InvalidOperationException("Не удалось запустить mstsc.exe.");
+                RegisterRdpClient(computer, client);
                 status.Text = "Клиент подключения запущен";
                 Trace("Запуск mstsc", computer, string.Join(" ", start.ArgumentList));
             }

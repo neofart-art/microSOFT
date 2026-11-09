@@ -16,6 +16,7 @@ internal sealed class MaintenanceResult
     public bool Verified { get; set; }
     public string Windows { get; set; } = "";
     public string WindowsVersion { get; set; } = "";
+    public string PrimaryIPv4 { get; set; } = "";
     public string[] Addresses { get; set; } = [];
     public string[] Office { get; set; } = [];
     public bool OfficeKnown { get; set; }

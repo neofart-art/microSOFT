@@ -32,4 +32,5 @@ Reject(() => StartupState.Decode(Convert.ToBase64String(System.Text.Encoding.UTF
 Reject(() => StartupState.Decode(new string('A', 16385)));
 passed += PowerTests.Run();
 passed += AddressHistoryTests.Run();
+passed += DiagnosticsIPv4Tests.Run();
 Console.WriteLine($"PASS: {passed} checks");

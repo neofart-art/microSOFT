@@ -4,7 +4,7 @@ namespace RdpShadowManager;
 internal sealed partial class MainForm
 {
     internal void SetInfoSmokeFixture() => SetComputerDetails("TEST-REMOTE-WORKSTATION",
-        "172.20.10.25\r\n172.20.10.26\r\n2001:db8::25",
+        "IPv4: 172.20.10.25",
         "Майкрософт Windows 11 Pro\r\n24H2, сборка 26100.1234",
         "Microsoft Office HomeBusinessRetail, версия 16.0.19127.20860, 64 бит (Click-to-Run)\r\nMicrosoft Visio Professional 2021, версия 16.0.14332.21040, 32 бит (MSI)");
     internal static async Task CheckComputerInfoStates()
@@ -12,19 +12,24 @@ internal sealed partial class MainForm
         using var form = new MainForm();
         form.Show();
         void Check(bool ok, string message) { if (!ok) throw new InvalidOperationException(message); }
+        form.InfoConnectedIPv4 = (_, _, _) => Task.FromResult<string?>(null);
         form.host.Text = "remote-a";
         form.InfoDns = (_, _) => Task.FromException<IPAddress[]>(new InvalidOperationException("DNS unavailable"));
         form.InfoQuery = (_, _) => Task.FromException<(MaintenanceResult, int, string)>(new InvalidOperationException("WinRM unavailable"));
         await form.LoadComputerInfo();
         Check(form.infoWindows.Text.Contains("Не удалось определить"), "Unavailable info must be unknown");
-        form.InfoQuery = (_, _) => Task.FromResult((new MaintenanceResult { Code = 0, Completed = true, Computer = "REMOTE-A", Windows = "Windows 11 Pro", WindowsVersion = "24H2, сборка 26100.1", OfficeKnown = true, Addresses = ["172.20.1.2", "172.20.1.3"] }, 0, ""));
+        form.InfoQuery = (_, _) => Task.FromResult((new MaintenanceResult { Code = 0, Completed = true, Computer = "REMOTE-A", Windows = "Windows 11 Pro", WindowsVersion = "24H2, сборка 26100.1", OfficeKnown = true, PrimaryIPv4 = "172.20.1.3", Addresses = ["2001:db8::1", "172.20.1.2", "172.20.1.3"] }, 0, ""));
         await form.LoadComputerInfo();
         Check(form.infoOffice.Text.Contains("Office не установлен"), "Confirmed absent Office");
-        Check(form.infoAddresses.Lines.SequenceEqual(new[] { "172.20.1.2", "172.20.1.3" }), "All IP addresses in tooltip");
+        Check(form.infoAddresses.Text == "IPv4: 172.20.1.3", "Only primary IPv4 without IPv6 is displayed");
+        form.InfoConnectedIPv4 = (_, _, _) => Task.FromResult<string?>("172.31.1.11");
+        await form.LoadComputerInfo();
+        Check(form.infoAddresses.Text == "IPv4: 172.31.1.11" && form.infoAddresses.Lines.Length == 1, "LAN connection wins over another primary/VPN address");
+        form.InfoConnectedIPv4 = (_, _, _) => Task.FromResult<string?>(null);
         form.InfoQuery = (_, _) => Task.FromResult((new MaintenanceResult { Code = 0, Completed = true, Office = ["Office 2019, 64 бит", "Visio 2021, 32 бит"] }, 0, ""));
         form.InfoDns = (_, _) => Task.FromResult(new[] { IPAddress.Parse("172.20.2.3") });
         await form.LoadComputerInfo();
-        Check(form.ipCaption.Text.Contains("DNS") && form.infoOffice.Text.Contains("Visio 2021") && form.infoOffice.Text.Contains("остальные продукты"), "DNS source and partial product list");
+        Check(form.infoAddresses.Text == "IPv4: Не удалось определить" && form.infoOffice.Text.Contains("Visio 2021") && form.infoOffice.Text.Contains("остальные продукты"), "DNS guesses are not presented as observed connection/remote primary");
         var pending = new TaskCompletionSource<(MaintenanceResult, int, string)>();
         form.InfoQuery = (_, _) => pending.Task;
         var old = form.LoadComputerInfo();
@@ -68,6 +73,18 @@ internal sealed partial class MainForm
         Check(partialSummary.Contains("write failed") && partialSummary.Contains("Почему не полностью"), "Partial result must explain its reason");
         Check(MaintenanceTitle("success", false) == "Настройки применены" && MaintenanceTitle("partial", false) == "Применены частично"
             && MaintenanceTitle("error", false) == "Не удалось применить" && MaintenanceTitle("unknown", false) == "Результат не подтверждён", "Short final status wording");
+        var unchanged = new MaintenanceResult { Completed = true, Verified = true, Code = 0, Success = 0, Skipped = 36, Failed = 0 };
+        const string initialization = "#< CLIXML\r\n<Objs xmlns=\"http://schemas.microsoft.com/powershell/2004/04\"><Obj S=\"progress\"><S N=\"StatusDescription\">Preparing modules for first use.</S></Obj></Objs>";
+        var already = MaintenanceOutcome(unchanged, 0, initialization, true);
+        Check(already == "current", "0 changed, 36 matching, no errors, exit 0 and service stderr is already current");
+        Check(MaintenanceTitle(already, false) == "Настройки AutoDiscover уже актуальны. Изменения не требуются"
+            && !ShowMaintenanceResultDialog(already), "Already current uses exact label without warning/modal");
+        form.ShowServiceNotice(MaintenanceTitle(already, false), Color.ForestGreen, "remote-c", "DOMAIN\\user");
+        Check(form.serviceNotice.ForeColor == Color.ForestGreen && form.serviceNotice.Text == MaintenanceTitle(already, false), "Already current is a green result");
+        Check(MaintenanceOutcome(unchanged, 0, initialization + "\nAccess denied", true) == "error", "Mixed or invalid error output still blocks success");
+        Check(MaintenanceOutcome(unchanged, 0, "#< CLIXML\n<Objs><S S=\"Error\">Access denied</S></Objs>", true) == "error", "Real error stream blocks current result");
+        unchanged.Completed = false;
+        Check(MaintenanceOutcome(unchanged, 0, initialization, true) == "unknown", "Service output cannot confirm an unfinished operation");
         result.Completed = false;
         Check(MaintenanceOutcome(result, 1, "", true) == "unknown", "Lost completion response remains unconfirmed");
         form.Close();

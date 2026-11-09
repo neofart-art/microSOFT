@@ -2,7 +2,7 @@ param([Parameter(Mandatory=$true)][string]$RequestJson)
 # This script is sent ONLY through Invoke-Command. Never dot-source or execute it locally.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$result = @{ Completed=$false; Verified=$false; OutlookDetectionError=''; Windows=''; WindowsVersion=''; Addresses=@(); Office=@(); OfficeKnown=$false; Code=1; Computer=$env:COMPUTERNAME; User=''; Sid=''; SessionId=0; MachineId=''; Versions=@(); Backups=@(); Conflicts=@(); Changed=@(); Errors=@(); Success=0; Skipped=0; Failed=0; BackupPath=''; OperationId=''; Message='' }
+$result = @{ Completed=$false; Verified=$false; OutlookDetectionError=''; Windows=''; WindowsVersion=''; Addresses=@(); PrimaryIPv4=''; Office=@(); OfficeKnown=$false; Code=1; Computer=$env:COMPUTERNAME; User=''; Sid=''; SessionId=0; MachineId=''; Versions=@(); Backups=@(); Conflicts=@(); Changed=@(); Errors=@(); Success=0; Skipped=0; Failed=0; BackupPath=''; OperationId=''; Message='' }
 $lock = $null; $held = $false
 $watch = [Diagnostics.Stopwatch]::StartNew()
 function Check-Deadline { if ($watch.Elapsed.TotalSeconds -gt 100) { throw 'Превышено время выполнения помощника. См. резервную копию и отчёт.' } }
@@ -44,6 +44,10 @@ try {
                 $parsed=$null
                 if ([Net.IPAddress]::TryParse($ip,[ref]$parsed) -and -not [Net.IPAddress]::IsLoopback($parsed) -and $ip -notmatch '^(169\.254\.|fe80:|0\.|::($|%))') { $ip }
             } }) | Select-Object -Unique)
+            $result.PrimaryIPv4=[string](@($result.Addresses | Where-Object {
+                $parsed=$null
+                [Net.IPAddress]::TryParse($_,[ref]$parsed) -and $parsed.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork
+            } | Select-Object -First 1))
         } catch { $result.Errors+="IP: $($_.Exception.Message)" }
         $officeErrors=@(); $products=@()
         foreach ($view in @('Registry64','Registry32')) {

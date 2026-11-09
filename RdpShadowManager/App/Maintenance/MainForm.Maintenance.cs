@@ -23,11 +23,13 @@ internal sealed partial class MainForm
     {
         if (!result.Completed) return "unknown";
         if (sameOperation && exitCode == 0 && result.Code == 0 && result.Verified && result.Failed == 0
-            && result.Errors.Length == 0 && result.Conflicts.Length == 0 && standardError.Length == 0) return "success";
+            && result.Errors.Length == 0 && result.Conflicts.Length == 0 && PowerShellDiagnostics.Analyze(standardError).Errors.Length == 0)
+            return result.Success == 0 && result.Skipped > 0 && result.Changed.Length == 0 ? "current" : "success";
         return sameOperation && result.Success > 0 ? "partial" : "error";
     }
     internal static string MaintenanceTitle(string outcome, bool restore) => outcome switch
     {
+        "current" => restore ? "Предыдущие настройки уже восстановлены. Изменения не требуются" : "Настройки AutoDiscover уже актуальны. Изменения не требуются",
         "success" => restore ? "Настройки восстановлены" : "Настройки применены",
         "partial" => restore ? "Восстановлены частично" : "Применены частично",
         "unknown" => "Результат не подтверждён",
@@ -37,12 +39,12 @@ internal sealed partial class MainForm
     {
         var text = $"{MaintenanceTitle(outcome, restore)}\nКомпьютер: {computer}\nПользователь: {user}\n"
             + $"Изменено: {result.Success}; уже соответствовало/пропущено: {result.Skipped}; ошибок: {result.Failed}.\n";
-        if (outcome != "success")
+        if (outcome is not ("success" or "current"))
         {
             var reasons = result.Errors.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().Take(6).Select(s => s.Length > 500 ? s[..500] + "…" : s).ToArray();
             string reason = reasons.Length > 0 ? string.Join("\n", reasons) :
                 result.OutlookDetectionError.Length > 0 ? result.OutlookDetectionError :
-                stderr.Length > 0 ? "Транспорт вернул ошибку; подробности сохранены в диагностике." :
+                PowerShellDiagnostics.Analyze(stderr).Errors.Length > 0 ? "Транспорт вернул ошибку; подробности сохранены в диагностике." :
                 !result.Completed ? "Не получено подтверждение завершения удалённого помощника." :
                 !result.Verified ? "Не подтверждена проверка всех значений реестра." :
                 result.Code == 0 ? "Ответ не прошёл проверку идентичности операции или целевого пользователя." : result.Message.Length > 0 ? result.Message : "Результат не прошёл проверку кода завершения.";
@@ -53,6 +55,15 @@ internal sealed partial class MainForm
         }
         if (result.BackupPath.Length > 0) text += "Резервная копия: " + result.BackupPath + "\n";
         return text + "Подробности — в диагностике.";
+    }
+    internal static bool ShowMaintenanceResultDialog(string outcome) => outcome != "current";
+    private void TracePowerShellStreams(string operationName, string computer, string stderr, int code)
+    {
+        if (string.IsNullOrWhiteSpace(stderr)) return;
+        Trace(operationName + " stderr / исходный", computer, stderr, code);
+        var streams = PowerShellDiagnostics.Analyze(stderr);
+        foreach (var message in streams.ServiceMessages) Trace(operationName + " stderr / служебный", computer, message);
+        foreach (var message in streams.Errors) Trace(operationName + " stderr / ошибка", computer, message, code);
     }
     private bool servicing;
     private bool serviceUncertain;
@@ -75,7 +86,9 @@ internal sealed partial class MainForm
             var request = new MaintenanceRequest("Inspect", computer, MaintenanceClient.LocalMachineId(), selected.Id, selected.User, selected.Domain);
             var inspected = await MaintenanceClient.Run(request);
             Trace("WinRM Inspect", computer, inspected.Result.Report(), inspected.ExitCode);
-            if (inspected.ExitCode != 0) throw new InvalidOperationException(inspected.Result.Message);
+            TracePowerShellStreams("WinRM Inspect", computer, inspected.StandardError, inspected.ExitCode);
+            if (inspected.ExitCode != 0 || PowerShellDiagnostics.Analyze(inspected.StandardError).Errors.Length > 0)
+                throw new InvalidOperationException("Предварительная проверка завершилась с ошибкой. " + inspected.Result.Message);
             var inspection = inspected.Result;
             if (inspection.Sid.Length == 0 || inspection.MachineId.Length == 0 || inspection.SessionId != selected.Id)
                 throw new InvalidOperationException("Не подтверждена идентичность цели обслуживания.");
@@ -85,6 +98,11 @@ internal sealed partial class MainForm
             {
                 var preview = await MaintenanceClient.Run(request with { Action = "RestorePreview", BackupId = id });
                 Trace("WinRM RestorePreview", computer, preview.Result.Report(), preview.ExitCode);
+                TracePowerShellStreams("WinRM RestorePreview", computer, preview.StandardError, preview.ExitCode);
+                if (PowerShellDiagnostics.Analyze(preview.StandardError).Errors.Length > 0 && preview.Result.Code == 0)
+                {
+                    preview.Result.Code = 1; preview.Result.Message = "Транспорт проверки восстановления вернул реальные ошибки. Подробнее — в диагностике.";
+                }
                 return preview.Result;
             });
             if (dialog.ShowDialog(this) != DialogResult.OK) { status.Text = "Обслуживание отменено. Настройки не изменены."; return; }
@@ -95,19 +113,19 @@ internal sealed partial class MainForm
             mutationSent = true;
             var finished = await MaintenanceClient.Run(request);
             Trace("Результат обслуживания", computer, finished.Result.Report(), finished.ExitCode);
-            if (finished.StandardError.Length > 0) Trace("WinRM stderr", computer, finished.StandardError, finished.ExitCode);
+            TracePowerShellStreams("WinRM", computer, finished.StandardError, finished.ExitCode);
             var result = finished.Result;
             bool confirmed = result.Completed;
             bool sameOperation = result.OperationId == (dialog.IsRestore ? request.BackupId : request.OperationId)
                 && result.MachineId == inspection.MachineId && result.Sid == inspection.Sid;
             var outcome = MaintenanceOutcome(result, finished.ExitCode, finished.StandardError, sameOperation);
-            bool success = outcome == "success";
+            bool success = outcome is "success" or "current";
             bool partial = outcome == "partial";
             if (!confirmed) serviceUncertain = true;
             var title = MaintenanceTitle(outcome, dialog.IsRestore);
             ShowServiceNotice(title, success ? Color.ForestGreen : partial || !confirmed ? Color.DarkOrange : Color.Firebrick, computer, inspection.User);
             status.Text = title;
-            MessageBox.Show(this, MaintenanceSummary(result, outcome, dialog.IsRestore, computer, inspection.User, finished.StandardError),
+            if (ShowMaintenanceResultDialog(outcome)) MessageBox.Show(this, MaintenanceSummary(result, outcome, dialog.IsRestore, computer, inspection.User, finished.StandardError),
                 title, MessageBoxButtons.OK, success ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
         }
         catch (Exception ex)
