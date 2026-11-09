@@ -32,7 +32,10 @@ internal sealed partial class MainForm
             panel.Controls.Add(caption, 0, 0); panel.Controls.Add(value, 0, 1);
             return panel;
         }
-        rows.Controls.Add(infoRefresh, 0, 0); rows.SetColumnSpan(infoRefresh, 2);
+        var tools = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
+        tools.Controls.Add(infoRefresh); tools.Controls.Add(moreSystemInfo);
+        rows.Controls.Add(tools, 0, 0); rows.SetColumnSpan(tools, 2);
+        moreSystemInfo.Click += (_,_) => OpenSystemInfo();
         rows.Controls.Add(Field(new Label { Text = "Компьютер", AutoSize = true }, infoComputer), 0, 1);
         rows.Controls.Add(Field(ipCaption, infoAddresses), 1, 1);
         var windows = Field(new Label { Text = "Windows", AutoSize = true }, infoWindows);

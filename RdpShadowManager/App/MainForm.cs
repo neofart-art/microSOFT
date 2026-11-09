@@ -132,6 +132,7 @@ internal sealed partial class MainForm : Form
     private void UpdateConnect()
     {
         UpdatePowerButtons();
+        moreSystemInfo.Enabled = !busy && !string.IsNullOrWhiteSpace(host.Text);
         connect.Enabled = !busy && Selected?.CanConnect == true;
         repair.Enabled = !busy && !serviceUncertain && Selected?.CanConnect == true;
         target.Text = Selected is {} selected ? $"Компьютер: {host.Text}   Пользователь: {selected.Domain}\\{selected.User}   ID сеанса: {selected.Id}\nSID будет проверен через WinRM перед подтверждением." : "Цель: выберите активный сеанс.";

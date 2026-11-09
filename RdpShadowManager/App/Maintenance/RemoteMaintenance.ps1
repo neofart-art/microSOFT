@@ -2,7 +2,7 @@ param([Parameter(Mandatory=$true)][string]$RequestJson)
 # This script is sent ONLY through Invoke-Command. Never dot-source or execute it locally.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$result = @{ Completed=$false; Verified=$false; OutlookDetectionError=''; Windows=''; WindowsVersion=''; Addresses=@(); PrimaryIPv4=''; RdpIPv4=''; Office=@(); OfficeKnown=$false; Code=1; Computer=$env:COMPUTERNAME; User=''; Sid=''; SessionId=0; MachineId=''; Versions=@(); Backups=@(); Conflicts=@(); Changed=@(); Errors=@(); Success=0; Skipped=0; Failed=0; BackupPath=''; OperationId=''; Message='' }
+$result = @{ Completed=$false; Verified=$false; OutlookDetectionError=''; Windows=''; WindowsVersion=''; Addresses=@(); PrimaryIPv4=''; RdpIPv4=''; SystemInfo=$null; Office=@(); OfficeKnown=$false; Code=1; Computer=$env:COMPUTERNAME; User=''; Sid=''; SessionId=0; MachineId=''; Versions=@(); Backups=@(); Conflicts=@(); Changed=@(); Errors=@(); Success=0; Skipped=0; Failed=0; BackupPath=''; OperationId=''; Message='' }
 $lock = $null; $held = $false
 $watch = [Diagnostics.Stopwatch]::StartNew()
 function Check-Deadline { if ($watch.Elapsed.TotalSeconds -gt 100) { throw 'Превышено время выполнения помощника. См. резервную копию и отчёт.' } }
@@ -30,12 +30,130 @@ function Read-RdpConnection {
         return @($matching)
     } catch { $result.Errors+="Проверка адреса RDP: $($_.Exception.Message)"; return @() }
 }
+function Read-SystemCim([string]$class,[string[]]$properties,[string]$namespace='root/cimv2') {
+    return @(Get-CimInstance -Namespace $namespace -ClassName $class -Property $properties -OperationTimeoutSec 6 -ErrorAction Stop)
+}
+function Read-RestartIndicators {
+    $reasons=@()
+    $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)
+    try {
+        foreach ($marker in @(
+            @{Path='SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending';Text='Component Based Servicing ожидает перезагрузку'},
+            @{Path='SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired';Text='Windows Update ожидает перезагрузку'}
+        )) {
+            $key=$base.OpenSubKey($marker.Path)
+            if ($key) { try { $reasons+=$marker.Text } finally { $key.Dispose() } }
+        }
+        $key=$base.OpenSubKey('SYSTEM\CurrentControlSet\Control\Session Manager')
+        if ($key) {
+            try {
+                if (@($key.GetValue('PendingFileRenameOperations',$null) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0) {
+                    $reasons+='Есть отложенные операции с файлами (PendingFileRenameOperations)'
+                }
+            } finally { $key.Dispose() }
+        }
+        return @{Pending=($reasons.Count -gt 0);Reasons=$reasons}
+    } finally { $base.Dispose() }
+}
+function Get-SystemInformation {
+    $details=@{
+        CapturedAt=[DateTimeOffset]::UtcNow.ToString('O');Manufacturer='';Model='';SerialNumber='';Windows='';LastBoot='';UptimeSeconds=$null;
+        InstalledRamBytes=$null;VisibleRamBytes=$null;FreeRamBytes=$null;Cpus=@();Volumes=@();PhysicalDisks=@();BitLocker=@();Updates=@();
+        RebootPending=$null;RebootReasons=@();Sections=@{};SectionErrors=@{}
+    }
+    $cache=@{OS=$null}
+    function Read-Section([string]$section,[scriptblock]$read) {
+        $details.Sections[$section]='loading'
+        try {
+            if ($watch.Elapsed.TotalSeconds -gt 50) { throw 'Достигнут лимит времени чтения сведений.' }
+            & $read
+            if (-not $details.SectionErrors.ContainsKey($section)) { $details.Sections[$section]='ok' }
+            else { $details.Sections[$section]='partial' }
+        } catch {
+            $details.Sections[$section]='error'
+            $details.SectionErrors[$section]=@($details.SectionErrors[$section])+@($_.Exception.Message)
+        }
+    }
+    Read-Section 'computer' {
+        $cs=@(Read-SystemCim 'Win32_ComputerSystem' @('Manufacturer','Model','TotalPhysicalMemory'))
+        if ($cs.Count -eq 0) { throw 'Win32_ComputerSystem не вернул сведения.' }
+        $details.Manufacturer=[string]$cs[0].Manufacturer; $details.Model=[string]$cs[0].Model
+        if ($null -ne $cs[0].TotalPhysicalMemory) { $details.InstalledRamBytes=[long]$cs[0].TotalPhysicalMemory }
+        $os=@(Read-SystemCim 'Win32_OperatingSystem' @('Caption','LastBootUpTime','TotalVisibleMemorySize','FreePhysicalMemory'))
+        if ($os.Count -eq 0) { throw 'Win32_OperatingSystem не вернул сведения.' }
+        $cache.OS=$os[0]; $details.Windows=[string]$os[0].Caption
+        if ($null -ne $os[0].LastBootUpTime) {
+            $boot=([datetime]$os[0].LastBootUpTime).ToUniversalTime()
+            $details.LastBoot=$boot.ToString('O')
+            $details.UptimeSeconds=[Math]::Max(0,([datetime]::UtcNow-$boot).TotalSeconds)
+        }
+        $bios=@(Read-SystemCim 'Win32_BIOS' @('SerialNumber'))
+        if ($bios.Count -eq 0) { throw 'Серийный номер BIOS недоступен.' }
+        $details.SerialNumber=[string]$bios[0].SerialNumber
+    }
+    Read-Section 'performance' {
+        $cpus=@(Read-SystemCim 'Win32_Processor' @('Name','NumberOfCores','NumberOfLogicalProcessors','LoadPercentage'))
+        if ($cpus.Count -eq 0) { throw 'Сведения о процессорах недоступны.' }
+        $details.Cpus=@(foreach ($cpu in $cpus) {
+            @{Name=[string]$cpu.Name;Cores=$cpu.NumberOfCores;LogicalProcessors=$cpu.NumberOfLogicalProcessors;LoadPercent=$cpu.LoadPercentage}
+        })
+        if (-not $cache.OS) {
+            $os=@(Read-SystemCim 'Win32_OperatingSystem' @('Caption','LastBootUpTime','TotalVisibleMemorySize','FreePhysicalMemory'))
+            if ($os.Count -eq 0) { throw 'Сведения об ОЗУ недоступны.' }
+            $cache.OS=$os[0]
+        }
+        if ($null -ne $cache.OS.TotalVisibleMemorySize) { $details.VisibleRamBytes=[long]$cache.OS.TotalVisibleMemorySize*1024 }
+        if ($null -ne $cache.OS.FreePhysicalMemory) { $details.FreeRamBytes=[long]$cache.OS.FreePhysicalMemory*1024 }
+    }
+    Read-Section 'volumes' {
+        $details.Volumes=@(Read-SystemCim 'Win32_LogicalDisk' @('DeviceID','DriveType','FileSystem','Size','FreeSpace') | Where-Object {$_.DriveType -eq 3} | ForEach-Object {
+            @{Drive=[string]$_.DeviceID;FileSystem=[string]$_.FileSystem;SizeBytes=$_.Size;FreeBytes=$_.FreeSpace}
+        })
+    }
+    Read-Section 'physical' {
+        $details.PhysicalDisks=@(Get-PhysicalDisk -ErrorAction Stop | ForEach-Object {
+            @{Name=[string]$_.FriendlyName;Health=[string]$_.HealthStatus;OperationalStatus=(@($_.OperationalStatus) -join ', ');SizeBytes=$_.Size}
+        })
+    }
+    Read-Section 'bitlocker' {
+        # Query only status properties/methods; never request protectors, recovery keys or passwords.
+        $volumes=@(Read-SystemCim 'Win32_EncryptableVolume' @('DriveLetter','ProtectionStatus') 'root/cimv2/Security/MicrosoftVolumeEncryption')
+        $details.BitLocker=@(foreach ($volume in $volumes) {
+            $row=@{Drive=[string]$volume.DriveLetter;ProtectionStatus=$volume.ProtectionStatus;ConversionStatus=$null;EncryptionPercent=$null;LockStatus=$null}
+            try {
+                $conversion=Invoke-CimMethod -InputObject $volume -MethodName GetConversionStatus -OperationTimeoutSec 6 -ErrorAction Stop
+                if ($conversion.ReturnValue -ne 0) { throw "GetConversionStatus вернул код $($conversion.ReturnValue)" }
+                $row.ConversionStatus=$conversion.ConversionStatus; $row.EncryptionPercent=$conversion.EncryptionPercentage
+                $lock=Invoke-CimMethod -InputObject $volume -MethodName GetLockStatus -OperationTimeoutSec 6 -ErrorAction Stop
+                if ($lock.ReturnValue -ne 0) { throw "GetLockStatus вернул код $($lock.ReturnValue)" }
+                $row.LockStatus=$lock.LockStatus
+            } catch { $details.SectionErrors['bitlocker']=@($details.SectionErrors['bitlocker'])+@($_.Exception.Message) }
+            $row
+        })
+    }
+    Read-Section 'updates' {
+        $rows=@(Read-SystemCim 'Win32_QuickFixEngineering' @('HotFixID','Description','InstalledOn') | ForEach-Object {
+            $date=[datetime]::MinValue
+            $raw=[string]$_.InstalledOn
+            $known=[datetime]::TryParse($raw,[ref]$date)
+            @{Id=[string]$_.HotFixID;Description=[string]$_.Description;InstalledOn=$(if ($known) {$date.ToString('yyyy-MM-dd')} else {$raw});SortDate=$date}
+        })
+        $details.Updates=@($rows | Sort-Object SortDate -Descending | Select-Object -First 20 | ForEach-Object {
+            @{Id=$_.Id;Description=$_.Description;InstalledOn=$_.InstalledOn}
+        })
+    }
+    Read-Section 'restart' {
+        $state=Read-RestartIndicators
+        $details.RebootPending=[bool]$state.Pending; $details.RebootReasons=@($state.Reasons)
+    }
+    return $details
+}
 try {
     if (-not (Get-Variable PSSenderInfo -ErrorAction SilentlyContinue) -or $null -eq $PSSenderInfo) { throw 'Помощник разрешён только в удалённой WinRM-сессии. Локальный запуск запрещён.' }
     $r = $RequestJson | ConvertFrom-Json
     $allowed = @('Action','Computer','LocalMachineId','SessionId','User','Domain','Sid','MachineId','Versions','CloseOutlook','BackupId','OperationId','ClientIPv4')
     foreach ($p in $r.PSObject.Properties.Name) { if ($p -notin $allowed) { throw "Неизвестный параметр: $p" } }
-    if ($r.Action -notin @('Inspect','Apply','RestorePreview','Restore','ComputerInfo','ConnectionInfo')) { throw 'Неизвестная операция.' }
+    if ($r.Action -notin @('Inspect','Apply','RestorePreview','Restore','ComputerInfo','ConnectionInfo','SystemInfo')) { throw 'Неизвестная операция.' }
     if ($r.Action -notin @('ComputerInfo','ConnectionInfo') -and [int]$r.SessionId -le 0) { throw 'Некорректный ID сеанса.' }
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if (-not ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Нужны административные права на удалённом компьютере.' }
@@ -45,6 +163,14 @@ try {
     $result.OperationId=if ($r.Action -eq 'Restore') { [string]$r.BackupId } else { [string]$r.OperationId }
     $result.MachineId=$machine
     if ($r.Action -notin @('Inspect','ComputerInfo','ConnectionInfo') -and $machine -ne $r.MachineId) { throw 'Изменилась идентичность целевого компьютера. Откройте диалог заново.' }
+    if ($r.Action -eq 'SystemInfo') {
+        $result.SystemInfo=Get-SystemInformation
+        foreach ($messages in $result.SystemInfo.SectionErrors.Values) { $result.Errors+=@($messages | Where-Object {$_}) }
+        $result.Code=0; $result.Completed=$true
+        $result.Message=if ($result.Errors.Count -eq 0) {'Сведения прочитаны.'} else {'Часть сведений недоступна. См. ошибки разделов.'}
+        ConvertTo-Json -InputObject $result -Depth 18 -Compress
+        return
+    }
     if ($r.Action -eq 'ConnectionInfo') {
         $result.Addresses=@(Read-RdpConnection)
         $result.Code=0; $result.Completed=$true

@@ -10,7 +10,7 @@ function Assert($value,[string]$message) { if (-not $value) { throw $message }; 
 # A direct invocation must stop before any registry or process access.
 $guard=& ([ScriptBlock]::Create($source)) '{"Action":"Inspect"}' | ConvertFrom-Json
 Assert ($guard.Code -ne 0 -and $guard.Message -match 'WinRM') 'Local invocation must fail closed'
-foreach ($name in @('New-Plan','Read-Value','Write-Value','Same-Value','Save-Backup','Restore-Conflict','Resolve-OutlookVersions','Assert-AutomaticVersions','Normalize-IPv4','Find-RdpIPv4')) {
+foreach ($name in @('New-Plan','Read-Value','Write-Value','Same-Value','Save-Backup','Restore-Conflict','Resolve-OutlookVersions','Assert-AutomaticVersions','Normalize-IPv4','Find-RdpIPv4','Get-SystemInformation')) {
     $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
     if (-not $node) { throw "Missing function: $name" }
     . ([ScriptBlock]::Create($node.Extent.Text))
@@ -46,6 +46,49 @@ Assert (@(Find-RdpIPv4 @(@{LocalAddress='172.31.1.11';RemoteAddress='172.31.1.99
 Assert ((Normalize-IPv4 '::ffff:172.31.1.11') -eq '172.31.1.11') 'IPv4 mapped server socket is normalized to IPv4'
 Assert ((Normalize-IPv4 '2001:db8::1') -eq '') 'Native IPv6 is not displayed'
 Assert (@(Find-RdpIPv4 @($sockets[0],@{LocalAddress='172.31.1.12';RemoteAddress='172.31.1.99';LocalPort=3389;State='Established'}) @('172.31.1.99')).Count -eq 2) 'Multiple endpoints are kept ambiguous, not guessed'
+# Read-only inventory collector with deterministic fake providers; no real hardware/registry changes.
+function Read-SystemCim([string]$class,[string[]]$properties,[string]$namespace='root/cimv2') {
+    switch ($class) {
+        'Win32_ComputerSystem' { return @(@{Manufacturer='Test';Model='Synthetic PC';TotalPhysicalMemory=17179869184}) }
+        'Win32_OperatingSystem' { return @(@{Caption='Windows test';LastBootUpTime=[datetime]::UtcNow.AddDays(-1);TotalVisibleMemorySize=16777216;FreePhysicalMemory=8388608}) }
+        'Win32_BIOS' { return @(@{SerialNumber='TEST-SERIAL'}) }
+        'Win32_Processor' { return @(@{Name='Test CPU';NumberOfCores=4;NumberOfLogicalProcessors=8;LoadPercentage=25}) }
+        'Win32_LogicalDisk' { return @(@{DeviceID='C:';DriveType=3;FileSystem='NTFS';Size=107374182400;FreeSpace=53687091200},@{DeviceID='Z:';DriveType=4;FileSystem='NTFS';Size=1;FreeSpace=1}) }
+        'Win32_EncryptableVolume' { return @(@{DriveLetter='C:';ProtectionStatus=1}) }
+        'Win32_QuickFixEngineering' { return @(@{HotFixID='KB-TEST';Description='Test';InstalledOn='2026-11-08'}) }
+        default { throw "Unexpected CIM query: $class" }
+    }
+}
+function Get-PhysicalDisk { return @(@{FriendlyName='Test SSD';HealthStatus='Healthy';OperationalStatus=@('OK');Size=107374182400}) }
+function Invoke-CimMethod($InputObject,[string]$MethodName,$OperationTimeoutSec,$ErrorAction) {
+    if ($MethodName -eq 'GetConversionStatus') { return @{ReturnValue=0;ConversionStatus=1;EncryptionPercentage=100} }
+    if ($MethodName -eq 'GetLockStatus') { return @{ReturnValue=0;LockStatus=0} }
+    throw 'Mutating or unknown BitLocker method forbidden'
+}
+function Read-RestartIndicators { return @{Pending=$true;Reasons=@('Windows Update test marker')} }
+$watch=[Diagnostics.Stopwatch]::StartNew()
+$inventory=Get-SystemInformation
+Assert ($inventory.Sections.Count -eq 7 -and @($inventory.Sections.Values | Where-Object {$_ -ne 'ok'}).Count -eq 0) 'All requested inventory sections collected'
+Assert ($inventory.Model -eq 'Synthetic PC' -and $inventory.SerialNumber -eq 'TEST-SERIAL') 'Model and serial preserved'
+Assert ($inventory.UptimeSeconds -ge 86300 -and $inventory.LastBoot -match 'Z$') 'Boot and uptime based on remote OS'
+Assert ($inventory.InstalledRamBytes -eq 17179869184 -and $inventory.FreeRamBytes -eq 8589934592) 'Memory units converted from KiB'
+Assert ($inventory.Cpus[0].LoadPercent -eq 25 -and $inventory.Cpus[0].LogicalProcessors -eq 8) 'CPU topology and load'
+Assert ($inventory.Volumes.Count -eq 1 -and $inventory.Volumes[0].Drive -eq 'C:') 'Network shares are not inventoried as local disks'
+Assert ($inventory.PhysicalDisks[0].Health -eq 'Healthy') 'Storage health read'
+Assert ($inventory.BitLocker[0].ProtectionStatus -eq 1 -and $inventory.BitLocker[0].EncryptionPercent -eq 100) 'Only BitLocker state'
+Assert ($inventory.Updates[0].Id -eq 'KB-TEST' -and $inventory.RebootPending) 'Recent QFE update and pending restart'
+$allowedMethods=@('GetConversionStatus','GetLockStatus')
+$methodCalls=$ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-CimMethod'},$true)
+Assert ($methodCalls.Count -eq 2) 'Only two status-getter BitLocker calls exist'
+Assert ($source -notmatch '(?i)Get-BitLockerVolume|GetKeyProtectorNumericalPassword|GetKeyProtectors|GetConversionStatus\s+-Arguments') 'No protectors/recovery keys or mutation arguments requested'
+function Get-PhysicalDisk { throw 'Storage access denied (fixture)' }
+$partial=Get-SystemInformation
+Assert ($partial.Sections.physical -eq 'error' -and $partial.Model -eq 'Synthetic PC' -and $partial.Updates.Count -eq 1) 'Unavailable storage does not discard other sections'
+Assert (($partial.SectionErrors.physical -join ' ') -match 'access denied') 'Partial cause retained'
+function Read-RestartIndicators { throw 'Registry access denied (fixture)' }
+$unknown=Get-SystemInformation
+Assert ($null -eq $unknown.RebootPending -and $unknown.Sections.restart -eq 'error') 'Unknown restart state is not false'
+Remove-Item Function:\Read-SystemCim,Function:\Get-PhysicalDisk,Function:\Invoke-CimMethod,Function:\Read-RestartIndicators
 $native=$ast.Find({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Type'},$true)
 . ([ScriptBlock]::Create($native.Extent.Text))
 Assert ($null -ne ('RsmNative' -as [type])) 'Native WTS and token-check code compiles'

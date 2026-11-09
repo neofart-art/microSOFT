@@ -11,6 +11,7 @@ internal sealed record MaintenanceRequest(string Action, string Computer, string
     bool CloseOutlook = false, string BackupId = "", string OperationId = "", string[]? ClientIPv4 = null);
 internal sealed class MaintenanceResult
 {
+    public SystemInfoData? SystemInfo { get; set; }
     public string OutlookDetectionError { get; set; } = "";
     public bool Completed { get; set; }
     public bool Verified { get; set; }
@@ -102,7 +103,7 @@ internal static class MaintenanceClient
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        deadline.CancelAfter(TimeSpan.FromSeconds(request.Action is "ComputerInfo" or "ConnectionInfo" ? 30 : 150));
+        deadline.CancelAfter(TimeSpan.FromSeconds(request.Action == "SystemInfo" ? 60 : request.Action is "ComputerInfo" or "ConnectionInfo" ? 30 : 150));
         try
         {
             await process.StandardInput.WriteLineAsync(wrapper.AsMemory(), deadline.Token);
