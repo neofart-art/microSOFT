@@ -13,12 +13,13 @@ internal sealed partial class MainForm
     private GroupBox BuildPowerGroup()
     {
         var group = new GroupBox { Text = "Питание удалённого компьютера", Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new(8), Margin = new(0,12,0,0) };
-        var controls = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, RowCount = 2 };
-        controls.ColumnStyles.Add(new(SizeType.Percent, 100));
+        var controls = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 3, RowCount = 2 };
+        for (int i = 0; i < 3; i++) controls.ColumnStyles.Add(new(SizeType.Percent, 100f / 3));
         controls.RowStyles.Add(new(SizeType.AutoSize)); controls.RowStyles.Add(new(SizeType.AutoSize));
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, Margin = Padding.Empty };
-        buttons.Controls.AddRange([restartComputer, shutdownComputer, abortPower]);
-        controls.Controls.Add(powerTarget, 0, 0); controls.Controls.Add(buttons, 0, 1); group.Controls.Add(controls);
+        controls.Controls.Add(powerTarget, 0, 0); controls.SetColumnSpan(powerTarget, 3);
+        controls.Controls.Add(restartComputer, 0, 1); controls.Controls.Add(shutdownComputer, 1, 1); controls.Controls.Add(abortPower, 2, 1);
+        foreach (var button in new[] { restartComputer, shutdownComputer, abortPower }) button.Dock = DockStyle.Fill;
+        group.Controls.Add(controls);
         restartComputer.Click += async (_,_) => await SendPower(PowerAction.Restart);
         shutdownComputer.Click += async (_,_) => await SendPower(PowerAction.Shutdown);
         abortPower.Click += async (_,_) => await SendPower(PowerAction.Abort);
