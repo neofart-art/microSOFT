@@ -14,7 +14,8 @@ internal sealed partial class MainForm
     {
         serviceNoticeTarget = CurrentServiceTarget;
         serviceNotice.ForeColor = color;
-        serviceNotice.Text = $"{text}\nКомпьютер: {computer}   Пользователь: {user}" + (finished ? $"   Завершено: {DateTimeOffset.Now:dd.MM.yyyy HH:mm:ss zzz}" : "");
+        serviceNotice.Text = text;
+        infoTips.SetToolTip(serviceNotice, $"Компьютер: {computer}; пользователь: {user}; {DateTimeOffset.Now:dd.MM.yyyy HH:mm:ss zzz}");
         serviceNotice.Visible = true;
         if (serviceNotice.Parent is {} parent) serviceNotice.MaximumSize = new(Math.Max(100, parent.ClientSize.Width - 6), 0);
     }
@@ -24,6 +25,34 @@ internal sealed partial class MainForm
         if (sameOperation && exitCode == 0 && result.Code == 0 && result.Verified && result.Failed == 0
             && result.Errors.Length == 0 && result.Conflicts.Length == 0 && standardError.Length == 0) return "success";
         return sameOperation && result.Success > 0 ? "partial" : "error";
+    }
+    internal static string MaintenanceTitle(string outcome, bool restore) => outcome switch
+    {
+        "success" => restore ? "Настройки восстановлены" : "Настройки применены",
+        "partial" => restore ? "Восстановлены частично" : "Применены частично",
+        "unknown" => "Результат не подтверждён",
+        _ => restore ? "Не удалось восстановить" : "Не удалось применить"
+    };
+    internal static string MaintenanceSummary(MaintenanceResult result, string outcome, bool restore, string computer, string user, string stderr)
+    {
+        var text = $"{MaintenanceTitle(outcome, restore)}\nКомпьютер: {computer}\nПользователь: {user}\n"
+            + $"Изменено: {result.Success}; уже соответствовало/пропущено: {result.Skipped}; ошибок: {result.Failed}.\n";
+        if (outcome != "success")
+        {
+            var reasons = result.Errors.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().Take(6).Select(s => s.Length > 500 ? s[..500] + "…" : s).ToArray();
+            string reason = reasons.Length > 0 ? string.Join("\n", reasons) :
+                result.OutlookDetectionError.Length > 0 ? result.OutlookDetectionError :
+                stderr.Length > 0 ? "Транспорт вернул ошибку; подробности сохранены в диагностике." :
+                !result.Completed ? "Не получено подтверждение завершения удалённого помощника." :
+                !result.Verified ? "Не подтверждена проверка всех значений реестра." :
+                result.Code == 0 ? "Ответ не прошёл проверку идентичности операции или целевого пользователя." : result.Message.Length > 0 ? result.Message : "Результат не прошёл проверку кода завершения.";
+            text += $"Почему не полностью: {reason}\nКод помощника: {result.Code}.\n";
+            if (result.Changed.Length > 0)
+                text += "Подтверждённые изменения:\n" + string.Join("\n", result.Changed.Take(5).Select(c =>
+                    c.TryGetProperty("Name", out var name) ? name.GetString() : "значение реестра")) + "\n";
+        }
+        if (result.BackupPath.Length > 0) text += "Резервная копия: " + result.BackupPath + "\n";
+        return text + "Подробности — в диагностике.";
     }
     private bool servicing;
     private bool serviceUncertain;
@@ -37,9 +66,10 @@ internal sealed partial class MainForm
         busy = true; servicing = true;
         host.Enabled = grid.Enabled = refresh.Enabled = consent.Enabled = noConsent.Enabled = timeout.Enabled = false;
         elevate.Enabled = false;
-        progress.Visible = true; UpdateConnect();
-        status.Text = "WinRM: проверка компьютера, сеанса, SID, профиля и версий Outlook…";
+        progress.Visible = false; UpdateConnect();
+        status.Text = "";
         bool mutationSent = false;
+        bool restoring = false;
         try
         {
             var request = new MaintenanceRequest("Inspect", computer, MaintenanceClient.LocalMachineId(), selected.Id, selected.User, selected.Domain);
@@ -58,11 +88,10 @@ internal sealed partial class MainForm
                 return preview.Result;
             });
             if (dialog.ShowDialog(this) != DialogResult.OK) { status.Text = "Обслуживание отменено. Настройки не изменены."; return; }
-            request = request with { Action = dialog.IsRestore ? "Restore" : "Apply", Versions = dialog.SelectedVersions,
+            restoring = dialog.IsRestore;
+            request = request with { Action = dialog.IsRestore ? "Restore" : "Apply", Versions = inspection.Versions,
                 CloseOutlook = dialog.CloseOutlook, BackupId = dialog.BackupId, OperationId = Guid.NewGuid().ToString() };
             Trace("Начало обслуживания", computer, $"{request.Action}; пользователь={inspection.User}; SID={inspection.Sid}; сеанс={selected.Id}; ID операции={request.OperationId}");
-            status.Text = "Выполняется удалённое обслуживание. Дождитесь проверки результата…";
-            ShowServiceNotice(dialog.IsRestore ? "Восстановление настроек AutoDiscover…" : "Применение настроек AutoDiscover…", SystemColors.ControlText, computer, inspection.User, false);
             mutationSent = true;
             var finished = await MaintenanceClient.Run(request);
             Trace("Результат обслуживания", computer, finished.Result.Report(), finished.ExitCode);
@@ -75,21 +104,22 @@ internal sealed partial class MainForm
             bool success = outcome == "success";
             bool partial = outcome == "partial";
             if (!confirmed) serviceUncertain = true;
-            ShowServiceNotice(!confirmed ? "Результат выполнения не подтверждён"
-                : success ? dialog.IsRestore ? "Предыдущие настройки AutoDiscover успешно восстановлены" : "Настройки Outlook AutoDiscover успешно применены"
-                : partial ? dialog.IsRestore ? "Настройки восстановлены частично. Подробнее — в диагностике" : "Настройки применены частично. Подробнее — в диагностике"
-                : dialog.IsRestore ? "Не удалось восстановить настройки. Подробнее — в диагностике" : "Не удалось применить настройки. Подробнее — в диагностике",
-                success ? Color.ForestGreen : partial || !confirmed ? Color.DarkOrange : Color.Firebrick, computer, inspection.User);
-            status.Text = success ? $"Помощник завершён: изменено {finished.Result.Success}, пропущено {finished.Result.Skipped}, ошибок {finished.Result.Failed}. Значения проверены." : "Обслуживание завершилось с ошибками. См. отчёт и резервную копию.";
-            MaintenanceDialog.ShowReport(this, "Результат обслуживания AutoDiscover", finished.Result.Report());
+            var title = MaintenanceTitle(outcome, dialog.IsRestore);
+            ShowServiceNotice(title, success ? Color.ForestGreen : partial || !confirmed ? Color.DarkOrange : Color.Firebrick, computer, inspection.User);
+            status.Text = title;
+            MessageBox.Show(this, MaintenanceSummary(result, outcome, dialog.IsRestore, computer, inspection.User, finished.StandardError),
+                title, MessageBoxButtons.OK, success ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
         }
-        catch (TimeoutException ex) { serviceUncertain = mutationSent; ShowServiceNotice(mutationSent ? "Результат выполнения не подтверждён" : "Не удалось применить настройки. Подробнее — в диагностике", mutationSent ? Color.DarkOrange : Color.Firebrick, computer, $"{selected.Domain}\\{selected.User}"); Failure("WinRM: результат неизвестен", computer, ex); MaintenanceDialog.ShowReport(this, "Результат операции неизвестен", ex.Message); }
         catch (Exception ex)
         {
             if (mutationSent) serviceUncertain = true;
-            ShowServiceNotice(mutationSent ? "Результат выполнения не подтверждён" : "Не удалось применить настройки. Подробнее — в диагностике", mutationSent ? Color.DarkOrange : Color.Firebrick, computer, $"{selected.Domain}\\{selected.User}");
-            var title = mutationSent ? "Результат операции неизвестен. Проверьте удалённую резервную копию." : "Обслуживание не начато";
-            Failure("WinRM обслуживание", computer, ex); MaintenanceDialog.ShowReport(this, title, ex.Message);
+            string outcome = mutationSent ? "unknown" : "error";
+            var title = MaintenanceTitle(outcome, restoring);
+            ShowServiceNotice(title, mutationSent ? Color.DarkOrange : Color.Firebrick, computer, $"{selected.Domain}\\{selected.User}");
+            status.Text = title;
+            Trace("Обслуживание AutoDiscover", computer, ex.ToString(), ex.HResult);
+            MessageBox.Show(this, title + "\nКомпьютер: " + computer + "\nПричина: " + ex.Message + "\nПодробнее — в диагностике.",
+                title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
         {

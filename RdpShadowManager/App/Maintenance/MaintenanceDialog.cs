@@ -3,13 +3,11 @@ internal sealed class MaintenanceDialog : Form
 {
     private readonly RadioButton apply = new() { Text = "Применить настройки", Checked = true, AutoSize = true };
     private readonly RadioButton restore = new() { Text = "Восстановить предыдущие настройки", AutoSize = true };
-    private readonly CheckedListBox versions = new() { CheckOnClick = true, Height = 66, Dock = DockStyle.Fill };
     private readonly ComboBox backups = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
     private readonly CheckBox closeOutlook = new() { Text = "Закрыть Outlook в выбранном сеансе", Checked = false, AutoSize = true };
     private readonly Button execute = new() { Text = "Выполнить", AutoSize = true };
     private bool checking;
     public bool IsRestore => restore.Checked;
-    public string[] SelectedVersions => versions.CheckedItems.Cast<string>().ToArray();
     public bool CloseOutlook => closeOutlook.Checked;
     public string BackupId => (backups.SelectedItem as BackupChoice)?.Id ?? "";
     public MaintenanceDialog(string computer, MaintenanceResult inspection, Func<string, Task<MaintenanceResult>> preview)
@@ -22,9 +20,7 @@ internal sealed class MaintenanceDialog : Form
         Add(new Label { Text = $"Компьютер: {computer} ({inspection.Computer})\nПользователь: {inspection.User}\nID сеанса: {inspection.SessionId}    SID: {inspection.Sid}", AutoSize = true });
         Add(new Label { Text = "Это предоставленный профиль настроек, а не универсальное исправление Outlook.\nИзменения HKLM относятся ко всему удалённому компьютеру и могут повлиять на других пользователей.", AutoSize = true, MaximumSize = new(680, 0) });
         Add(apply); Add(restore);
-        Add(new Label { Text = inspection.Versions.Length == 0 ? "Outlook не найден. Для применения явно выберите установленную версию:" : "Обнаруженные версии отмечены. Выберите версии для применения:", AutoSize = true });
-        foreach (var v in new[] { "16.0", "15.0", "14.0" }) versions.Items.Add(v, inspection.Versions.Contains(v));
-        Add(versions);
+        Add(new Label { Text = inspection.OutlookDetectionError.Length > 0 ? "Версия классического Outlook не определена: " + inspection.OutlookDetectionError + "\nПрименение будет остановлено без изменения реестра. Восстановление из копии остаётся доступным." : "Автоматически определённые ветки Outlook: " + string.Join(", ", inspection.Versions), AutoSize = true, MaximumSize = new(680, 0) });
         Add(new Label { Text = "Резервная копия этого компьютера и SID для восстановления:", AutoSize = true });
         backups.Items.AddRange(inspection.Backups); if (backups.Items.Count > 0) backups.SelectedIndex = 0;
         Add(backups); Add(closeOutlook);
@@ -33,21 +29,21 @@ internal sealed class MaintenanceDialog : Form
         var cancel = new Button { Text = "Отмена", AutoSize = true, DialogResult = DialogResult.Cancel };
         buttons.Controls.Add(execute); buttons.Controls.Add(cancel); Add(buttons);
         CancelButton = cancel;
-        void UpdateMode() { versions.Enabled = apply.Checked; backups.Enabled = restore.Checked; execute.Enabled = !checking && (apply.Checked ? versions.CheckedItems.Count > 0 : backups.SelectedItem != null); }
+        void UpdateMode() { backups.Enabled = restore.Checked; execute.Enabled = !checking && (apply.Checked || backups.SelectedItem != null); }
         apply.CheckedChanged += (_,_) => UpdateMode(); restore.CheckedChanged += (_,_) => UpdateMode();
-        versions.ItemCheck += (_,_) => BeginInvoke((Action)UpdateMode); backups.SelectedIndexChanged += (_,_) => UpdateMode();
+        backups.SelectedIndexChanged += (_,_) => UpdateMode();
         execute.Click += async (_,_) =>
         {
             if (checking) return;
             if (CloseOutlook && MessageBox.Show(this, "Outlook будет принудительно завершён только в выбранном сеансе выбранного пользователя. Несохранённые данные могут быть потеряны. Продолжить?", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             checking = true; execute.Enabled = false; cancel.Enabled = false;
-            apply.Enabled = restore.Enabled = versions.Enabled = backups.Enabled = closeOutlook.Enabled = false;
+            apply.Enabled = restore.Enabled = backups.Enabled = closeOutlook.Enabled = false;
             try
             {
                 if (IsRestore)
                 {
                     var result = await preview(BackupId);
-                    if (result.Code != 0) { ShowReport(this, "Конфликты / ошибка проверки восстановления", result.Report()); return; }
+                    if (result.Code != 0) { MessageBox.Show(this, "Восстановление не начато.\n" + result.Message + "\nКонфликтов: " + result.Conflicts.Length + ". Подробнее — в диагностике.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
                 }
                 DialogResult = DialogResult.OK; Close();
             }

@@ -10,11 +10,31 @@ function Assert($value,[string]$message) { if (-not $value) { throw $message }; 
 # A direct invocation must stop before any registry or process access.
 $guard=& ([ScriptBlock]::Create($source)) '{"Action":"Inspect"}' | ConvertFrom-Json
 Assert ($guard.Code -ne 0 -and $guard.Message -match 'WinRM') 'Local invocation must fail closed'
-foreach ($name in @('New-Plan','Read-Value','Write-Value','Same-Value','Save-Backup','Restore-Conflict')) {
+foreach ($name in @('New-Plan','Read-Value','Write-Value','Same-Value','Save-Backup','Restore-Conflict','Resolve-OutlookVersions','Assert-AutomaticVersions')) {
     $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
     if (-not $node) { throw "Missing function: $name" }
     . ([ScriptBlock]::Create($node.Extent.Text))
 }
+# Pure detection fixtures: no installed Office or real Outlook registry is needed.
+$office2019=Resolve-OutlookVersions @(@{Path='C:\Office16\OUTLOOK.EXE';RegistryBranch='16.0';FileVersion='16.0.19127.20860'}) @()
+Assert ($office2019.Error -eq '' -and ($office2019.Versions -join ',') -eq '16.0') 'Office 2019 build maps to branch 16.0'
+$office2013=Resolve-OutlookVersions @(@{Path='C:\Office15\OUTLOOK.EXE';RegistryBranch='15.0';FileVersion='15.0.5579.1000'}) @()
+Assert ($office2013.Error -eq '' -and ($office2013.Versions -join ',') -eq '15.0') 'Outlook 2013 maps to branch 15.0'
+$both=Resolve-OutlookVersions @(@{Path='a';RegistryBranch='15.0';FileVersion='15.0.1.0'},@{Path='b';RegistryBranch='16.0';FileVersion='16.0.1.0'}) @()
+Assert (($both.Versions -join ',') -eq '15.0,16.0') 'Two independently confirmed versions keep both branches'
+$wrong=Resolve-OutlookVersions @(@{Path='a';RegistryBranch='15.0';FileVersion='16.0.1.0'}) @()
+Assert ($wrong.Error.Length -gt 0) 'Conflicting file and registration blocks application'
+$missing=Resolve-OutlookVersions @() @()
+Assert ($missing.Error.Length -gt 0) 'No classic Outlook is not an invitation to write all versions'
+$unknown=Resolve-OutlookVersions @(@{Path='a';RegistryBranch='16.0';FileVersion='unknown'}) @()
+Assert ($unknown.Error.Length -gt 0) 'Unknown executable version is rejected'
+$unreadable=Resolve-OutlookVersions @(@{Path='a';RegistryBranch='16.0';FileVersion='16.0.1.0'}) @('access denied')
+Assert ($unreadable.Error -match 'access denied') 'Incomplete discovery blocks blind repair'
+Assert ((@(Assert-AutomaticVersions $office2019 @('16.0')) -join ',') -eq '16.0') 'Apply uses detected branch'
+try { Assert-AutomaticVersions $office2019 @('15.0'); throw 'Changed versions accepted' } catch { Assert ($_.Exception.Message -ne 'Changed versions accepted') 'Installation change after confirmation is rejected' }
+try { Assert-AutomaticVersions $missing @(); throw 'Absent Outlook accepted' } catch { Assert ($_.Exception.Message -ne 'Absent Outlook accepted') 'No writes when automatic discovery fails' }
+# Detection and branch validation must precede backup creation / mutation.
+Assert ($source.IndexOf('$versions=@(Assert-AutomaticVersions') -lt $source.IndexOf('$entries=@()')) 'Automatic validation precedes registry mutation planning'
 $native=$ast.Find({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Type'},$true)
 . ([ScriptBlock]::Create($native.Extent.Text))
 Assert ($null -ne ('RsmNative' -as [type])) 'Native WTS and token-check code compiles'

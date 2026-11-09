@@ -11,6 +11,7 @@ internal sealed record MaintenanceRequest(string Action, string Computer, string
     bool CloseOutlook = false, string BackupId = "", string OperationId = "");
 internal sealed class MaintenanceResult
 {
+    public string OutlookDetectionError { get; set; } = "";
     public bool Completed { get; set; }
     public bool Verified { get; set; }
     public string Windows { get; set; } = "";
@@ -53,6 +54,12 @@ internal static class MaintenanceClient
         using var key = root.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography");
         return key?.GetValue("MachineGuid") as string ?? throw new InvalidOperationException("Не удалось прочитать локальный MachineGuid. Обслуживание заблокировано.");
     }
+    internal static ProcessStartInfo HiddenPowerShellStart(string executable) => new(executable)
+    {
+        UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden,
+        RedirectStandardOutput = true, RedirectStandardError = true,
+        StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+    };
     public static async Task<(MaintenanceResult Result, int ExitCode, string StandardError)> Run(MaintenanceRequest request, CancellationToken cancellation = default)
     {
         Connection.ValidateHost(request.Computer);
@@ -83,7 +90,8 @@ internal static class MaintenanceClient
             """;
         var executable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe");
         if (!File.Exists(executable)) throw new FileNotFoundException("Windows PowerShell не найден. Нужен PowerShell 5.1 и настроенный WinRM.");
-        var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
+        var start = HiddenPowerShellStart(executable); /* hidden, redirected process */
+
         // Only this short bootstrap is on the command line; helper source is streamed as data.
         var bootstrap = "& ([ScriptBlock]::Create([Console]::In.ReadToEnd()))";
         foreach (var a in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(bootstrap)) }) start.ArgumentList.Add(a);

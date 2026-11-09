@@ -2,7 +2,7 @@ param([Parameter(Mandatory=$true)][string]$RequestJson)
 # This script is sent ONLY through Invoke-Command. Never dot-source or execute it locally.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$result = @{ Completed=$false; Verified=$false; Windows=''; WindowsVersion=''; Addresses=@(); Office=@(); OfficeKnown=$false; Code=1; Computer=$env:COMPUTERNAME; User=''; Sid=''; SessionId=0; MachineId=''; Versions=@(); Backups=@(); Conflicts=@(); Changed=@(); Errors=@(); Success=0; Skipped=0; Failed=0; BackupPath=''; OperationId=''; Message='' }
+$result = @{ Completed=$false; Verified=$false; OutlookDetectionError=''; Windows=''; WindowsVersion=''; Addresses=@(); Office=@(); OfficeKnown=$false; Code=1; Computer=$env:COMPUTERNAME; User=''; Sid=''; SessionId=0; MachineId=''; Versions=@(); Backups=@(); Conflicts=@(); Changed=@(); Errors=@(); Success=0; Skipped=0; Failed=0; BackupPath=''; OperationId=''; Message='' }
 $lock = $null; $held = $false
 $watch = [Diagnostics.Stopwatch]::StartNew()
 function Check-Deadline { if ($watch.Elapsed.TotalSeconds -gt 100) { throw 'Превышено время выполнения помощника. См. резервную копию и отчёт.' } }
@@ -139,29 +139,80 @@ public static class RsmNative {
     $lock=[Threading.Mutex]::new($false,'Global\RdpShadowManager-Maintenance')
     try { $held=$lock.WaitOne(0) } catch [Threading.AbandonedMutexException] { $held=$true }
     if (-not $held) { throw 'На этом компьютере уже выполняется обслуживание. Дождитесь его завершения.' }
-    function Get-Versions {
+    function Resolve-OutlookVersions([object[]]$evidence,[string[]]$problems) {
+        $issues=@($problems)
         $versions=@()
+        foreach ($item in $evidence) {
+            $major=0
+            if (-not [int]::TryParse(([string]$item.FileVersion -split '\.')[0],[ref]$major) -or $major -notin @(15,16)) {
+                $issues+="Не поддерживается или неизвестна версия OUTLOOK.EXE: $($item.FileVersion) ($($item.Path))"; continue
+            }
+            $branch="$major.0"
+            if ($branch -ne $item.RegistryBranch) { $issues+="Противоречие версии файла $($item.FileVersion) и установленной ветки $($item.RegistryBranch): $($item.Path)"; continue }
+            $versions+=$branch
+        }
+        $versions=@($versions | Sort-Object -Unique)
+        if ($issues.Count -eq 0 -and $versions.Count -eq 0) { $issues+='Классический Outlook 15.0/16.0 не найден. Реестр не изменён.' }
+        return @{ Versions=$versions; Error=($issues -join '; ') }
+    }
+    function Assert-AutomaticVersions($detected,[string[]]$confirmed) {
+        if ($detected.Error -or @($detected.Versions).Count -eq 0) { throw "Нельзя однозначно определить установленный классический Outlook: $($detected.Error)" }
+        if ((@($confirmed | Sort-Object -Unique) -join ',') -ne (@($detected.Versions | Sort-Object -Unique) -join ',')) {
+            throw 'Установленные версии Outlook изменились после подтверждения. Откройте обслуживание заново.'
+        }
+        return @($detected.Versions)
+    }
+    function Get-OutlookDetection {
+        $evidence=@(); $problems=@()
         foreach ($view in @('Registry64','Registry32')) {
-            $h=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::$view)
+            $h=$null
             try {
+                $h=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::$view)
                 foreach ($v in @('16.0','15.0','14.0')) {
                     $k=$h.OpenSubKey("SOFTWARE\Microsoft\Office\$v\Outlook\InstallRoot")
-                    if ($k) { try { $path=[string]$k.GetValue('Path'); if ($path -and (Test-Path -LiteralPath (Join-Path $path 'OUTLOOK.EXE') -PathType Leaf)) { $versions+=$v } } finally { $k.Dispose() } }
+                    if ($k) {
+                        try {
+                            $path=[string]$k.GetValue('Path')
+                            if (-not $path) { $problems+="Outlook $v ($view): InstallRoot не содержит Path"; continue }
+                            $exe=Join-Path $path 'OUTLOOK.EXE'
+                            if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { $problems+="Outlook $v ($view): не найден $exe"; continue }
+                            $file=[Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+                            $evidence+=@{ Path=$exe; RegistryBranch=$v; FileVersion="$($file.FileMajorPart).$($file.FileMinorPart).$($file.FileBuildPart).$($file.FilePrivatePart)" }
+                        } finally { $k.Dispose() }
+                    }
                 }
-                $k=$h.OpenSubKey('SOFTWARE\Microsoft\Office\ClickToRun\Configuration')
-                if ($k) {
+                foreach ($config in @('SOFTWARE\Microsoft\Office\ClickToRun\Configuration','SOFTWARE\Microsoft\Office\15.0\ClickToRun\Configuration','SOFTWARE\Microsoft\Office\16.0\ClickToRun\Configuration')) {
+                    $k=$h.OpenSubKey($config)
+                    if (-not $k) { continue }
                     try {
-                        $products=[string]$k.GetValue('ProductReleaseIds'); $version=[string]$k.GetValue('VersionToReport'); $install=[string]$k.GetValue('InstallationPath')
-                        if ($version -match '^16\.' -and $products -match '(?i)(Outlook|O365ProPlus|O365Business|ProPlus|Professional|Standard|HomeBusiness|Mondo)' -and $install) {
-                            foreach ($suffix in @('root\Office16\OUTLOOK.EXE','Office16\OUTLOOK.EXE')) { if (Test-Path -LiteralPath (Join-Path $install $suffix) -PathType Leaf) { $versions+='16.0' } }
+                        $products=[string]$k.GetValue('ProductReleaseIds','')
+                        $excluded=[string]$k.GetValue('ExcludedApps','')
+                        if ($products -notmatch '(?i)(Outlook|O365ProPlus|O365Business|ProPlus|Professional|Standard|HomeBusiness|Mondo)' -or $excluded -match '(?i)(^|[,;\s])Outlook($|[,;\s])') { continue }
+                        $version=[string]$k.GetValue('VersionToReport',$k.GetValue('ClientVersionToReport',''))
+                        $install=[string]$k.GetValue('InstallationPath','')
+                        $major=0
+                        if (-not [int]::TryParse(($version -split '\.')[0],[ref]$major) -or $major -notin @(15,16) -or -not $install) {
+                            $problems+="Click-to-Run ($view): отсутствует или не поддерживается версия/путь Outlook ($version)"; continue
                         }
+                        $found=$false
+                        foreach ($suffix in @("root\Office$major\OUTLOOK.EXE","Office$major\OUTLOOK.EXE",'OUTLOOK.EXE')) {
+                            $exe=Join-Path $install $suffix
+                            if (Test-Path -LiteralPath $exe -PathType Leaf) {
+                                $file=[Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+                                $evidence+=@{ Path=$exe; RegistryBranch="$major.0"; FileVersion="$($file.FileMajorPart).$($file.FileMinorPart).$($file.FileBuildPart).$($file.FilePrivatePart)" }
+                                $found=$true
+                            }
+                        }
+                        if (-not $found) { $problems+="Click-to-Run ($view): установленный продукт $products сообщает $version, но классический OUTLOOK.EXE не найден" }
                     } finally { $k.Dispose() }
                 }
-            } finally { $h.Dispose() }
+            } catch { $problems+="Определение Outlook ($view): $($_.Exception.Message)" }
+            finally { if ($h) { $h.Dispose() } }
         }
-        return @($versions | Select-Object -Unique)
+        return Resolve-OutlookVersions @($evidence) @($problems)
     }
-    $result.Versions=@(Get-Versions)
+    $detected=Get-OutlookDetection
+    $result.Versions=@($detected.Versions); $result.OutlookDetectionError=[string]$detected.Error
     $root=Join-Path $env:ProgramData 'RdpShadowManager\Backups'
     function Assert-SafeDirectory([string]$path) {
         if (Test-Path -LiteralPath $path) {
@@ -272,8 +323,7 @@ public static class RsmNative {
         }
         $desired=@{ Exists=$true; Kind='DWord'; Data='1' }
         if ($r.Action -eq 'Apply') {
-            $versions=@($r.Versions | Select-Object -Unique)
-            if ($versions.Count -eq 0) { throw 'Outlook не найден или версия не выбрана. Укажите версию явно в диалоге.' }
+            $versions=@(Assert-AutomaticVersions $detected @($r.Versions))
             $plan=@(New-Plan $versions)
             $entries=@()
             foreach ($entry in $plan) { Check-Deadline; $entries+=@{ Target=$entry; Before=(Read-Value $entry); Expected=$desired; State='Pending' } }

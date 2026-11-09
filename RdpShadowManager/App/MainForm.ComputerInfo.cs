@@ -4,7 +4,12 @@ using RdpShadowManager.Core;
 namespace RdpShadowManager;
 internal sealed partial class MainForm
 {
-    private readonly Label computerInfo = new() { Text = "Получите сеансы выбранного компьютера.", AutoSize = true, Dock = DockStyle.Top, Margin = new(3, 6, 3, 6), UseMnemonic = false };
+    private static TextBox InfoField(int height) => new() { ReadOnly = true, Multiline = true, WordWrap = true, ScrollBars = ScrollBars.Vertical, ShortcutsEnabled = true, Dock = DockStyle.Fill, Height = height, MinimumSize = new(40, height), BackColor = SystemColors.Window };
+    private readonly TextBox infoComputer = InfoField(60);
+    private readonly TextBox infoAddresses = InfoField(60);
+    private readonly TextBox infoWindows = InfoField(54);
+    private readonly TextBox infoOffice = InfoField(90);
+    private readonly Label ipCaption = new() { Text = "IP-адреса", AutoSize = true };
     private readonly Button infoRefresh = new() { Text = "↻", AccessibleName = "Обновить сведения о ПК", AutoSize = true, Enabled = false };
     private readonly ToolTip infoTips = new() { AutoPopDelay = 30000 };
     private CancellationTokenSource? infoCancellation;
@@ -16,18 +21,38 @@ internal sealed partial class MainForm
     private Control BuildComputerInfo()
     {
         var group = new GroupBox { Text = "Сведения о ПК", Dock = DockStyle.Top, AutoSize = true, Padding = new(6) };
-        var rows = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 2 };
-        rows.ColumnStyles.Add(new(SizeType.Percent, 100));
-        rows.Controls.Add(infoRefresh, 0, 0); rows.Controls.Add(computerInfo, 0, 1);
-        rows.SizeChanged += (_, _) => computerInfo.MaximumSize = new(Math.Max(40, rows.ClientSize.Width - 6), 0);
+        var rows = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 4 };
+        rows.ColumnStyles.Add(new(SizeType.Percent, 50)); rows.ColumnStyles.Add(new(SizeType.Percent, 50));
+        for (int i = 0; i < 4; i++) rows.RowStyles.Add(new(SizeType.AutoSize));
+        Control Field(Control caption, TextBox value)
+        {
+            var panel = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, RowCount = 2, Margin = new(3, 4, 3, 4) };
+            panel.ColumnStyles.Add(new(SizeType.Percent, 100));
+            panel.RowStyles.Add(new(SizeType.AutoSize)); panel.RowStyles.Add(new(SizeType.Absolute, value.Height));
+            panel.Controls.Add(caption, 0, 0); panel.Controls.Add(value, 0, 1);
+            return panel;
+        }
+        rows.Controls.Add(infoRefresh, 0, 0); rows.SetColumnSpan(infoRefresh, 2);
+        rows.Controls.Add(Field(new Label { Text = "Компьютер", AutoSize = true }, infoComputer), 0, 1);
+        rows.Controls.Add(Field(ipCaption, infoAddresses), 1, 1);
+        var windows = Field(new Label { Text = "Windows", AutoSize = true }, infoWindows);
+        var office = Field(new Label { Text = "Office", AutoSize = true }, infoOffice);
+        rows.Controls.Add(windows, 0, 2); rows.SetColumnSpan(windows, 2);
+        rows.Controls.Add(office, 0, 3); rows.SetColumnSpan(office, 2);
         group.Controls.Add(rows);
         infoRefresh.Click += async (_, _) => await LoadComputerInfo();
+        SetComputerDetails("", "Получите сеансы выбранного компьютера.", "", "");
         return group;
+    }
+    private void SetComputerDetails(string computer, string addresses, string windows, string office)
+    {
+        infoComputer.Text = computer; infoAddresses.Text = addresses;
+        infoWindows.Text = windows; infoOffice.Text = office;
     }
     private void ClearComputerInfo()
     {
         infoGeneration++; infoCancellation?.Cancel(); infoAvailable = false; infoRefresh.Enabled = false;
-        computerInfo.Text = "Получите сеансы выбранного компьютера."; infoTips.SetToolTip(computerInfo, "");
+        SetComputerDetails("", "Получите сеансы выбранного компьютера.", "", ""); ipCaption.Text = "IP-адреса"; infoTips.SetToolTip(infoAddresses, "");
     }
     private async Task LoadComputerInfo()
     {
@@ -37,7 +62,7 @@ internal sealed partial class MainForm
         infoCancellation?.Cancel();
         var cancellation = new CancellationTokenSource(); infoCancellation = cancellation;
         long generation = ++infoGeneration;
-        infoAvailable = true; infoRefresh.Enabled = false; computerInfo.Text = "Получение сведений…";
+        infoAvailable = true; infoRefresh.Enabled = false; SetComputerDetails(computer, "Получение сведений…", "Получение сведений…", "Получение сведений…");
         bool Current() => !IsDisposed && !Disposing && !closing && generation == infoGeneration;
         try
         {
@@ -70,10 +95,12 @@ internal sealed partial class MainForm
             var office = data?.Office ?? [];
             var officeText = office.Length > 0 ? string.Join("\n", office) + (data!.OfficeKnown ? "" : "\nНе удалось определить остальные продукты")
                 : data?.OfficeKnown == true ? "Office не установлен" : "Не удалось определить";
-            computerInfo.Text = $"Компьютер: {computer}" + (data?.Computer.Length > 0 && !string.Equals(computer, data.Computer, StringComparison.OrdinalIgnoreCase) ? $" ({data.Computer})" : "")
-                + $"\n{ipLabel}: {(addresses.Length > 0 ? addresses[0] : "Не удалось определить")}" + (addresses.Length > 1 ? $" (+{addresses.Length - 1}, см. подсказку)" : "")
-                + $"\nWindows: {Known(data?.Windows)}\nВерсия: {Known(data?.WindowsVersion)}\nOffice: {officeText}";
-            infoTips.SetToolTip(computerInfo, addresses.Length == 0 ? "IP не определён" : ipLabel + ":\n" + string.Join("\n", addresses));
+            SetComputerDetails(computer + (data?.Computer.Length > 0 && !string.Equals(computer, data.Computer, StringComparison.OrdinalIgnoreCase) ? $" ({data.Computer})" : ""),
+                addresses.Length > 0 ? string.Join(Environment.NewLine, addresses) : "Не удалось определить",
+                Known(data?.Windows) + Environment.NewLine + Known(data?.WindowsVersion), officeText.Replace("\n", Environment.NewLine));
+            ipCaption.Text = ipLabel == "IP" ? "IP-адреса" : $"IP-адреса ({ipLabel.Replace("IP ", "")})";
+            infoTips.SetToolTip(infoAddresses, addresses.Length == 0 ? "IP не определён" : ipLabel);
+
         }
         catch (OperationCanceledException) { }
         finally

@@ -10,7 +10,7 @@ internal sealed partial class MainForm : Form
 {
     private readonly ComboBox host = new() { Width = 280, MaxLength = 253, DropDownStyle = ComboBoxStyle.DropDown, AutoCompleteMode = AutoCompleteMode.SuggestAppend, AutoCompleteSource = AutoCompleteSource.ListItems, MaxDropDownItems = 12 };
     private readonly Button refresh = new() { Text = "Получить сеансы", AutoSize = true };
-    private readonly Button connect = new ConnectButton() { Text = "Подключиться", Size = new(200, 46), Enabled = false };
+    private readonly Button connect = new ConnectButton() { Text = "Подключиться", Size = new(400, 46), Enabled = false };
     private readonly RadioButton consent = new() { Text = "С запросом согласия пользователя", Checked = true, AutoSize = true };
     private readonly RadioButton noConsent = new() { Text = "Без запроса согласия пользователя", AutoSize = true };
     private readonly DataGridView grid = new() { Dock = DockStyle.Fill, ReadOnly = true, MultiSelect = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill };
@@ -34,12 +34,12 @@ internal sealed partial class MainForm : Form
         using (var iconStream = typeof(MainForm).Assembly.GetManifestResourceStream("RdpShadowManager.Resources.app.ico")!)
             Icon = new Icon(iconStream, 256, 256);
         ShowIcon = true; ShowInTaskbar = true;
-        ClientSize = new(1174, 880); MinimumSize = new(1004, 740);
+        ClientSize = new(1174, 880); MinimumSize = new(1104, 740);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Padding = new(12), Margin = Padding.Empty };
         layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.Percent, 100));
         for (int i=2;i<9;i++) layout.RowStyles.Add(new(SizeType.AutoSize));
         var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-        shell.ColumnStyles.Add(new(SizeType.Percent, 100)); shell.ColumnStyles.Add(new(SizeType.Absolute, 224));
+        shell.ColumnStyles.Add(new(SizeType.Percent, 100)); shell.ColumnStyles.Add(new(SizeType.Absolute, 400));
         shell.RowStyles.Add(new(SizeType.Percent, 100));
         Controls.Add(shell); shell.Controls.Add(layout, 0, 0);
         var art = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, AutoScroll = true, Padding = new(12), Margin = Padding.Empty };
@@ -47,7 +47,7 @@ internal sealed partial class MainForm : Form
         art.RowStyles.Add(new(SizeType.Absolute, 160)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.Percent, 100));
         using var imageStream = typeof(MainForm).Assembly.GetManifestResourceStream("RdpShadowManager.Resources.outlook-mascot.jpg")!;
         using var sourceImage = Image.FromStream(imageStream);
-        var mascot = new PictureBox { Image = new Bitmap(sourceImage), SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.Fill, Margin = Padding.Empty, AccessibleName = "Персонаж Outlook", TabStop = false };
+        var mascot = new PictureBox { Image = new Bitmap(sourceImage), SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.None, Anchor = AnchorStyles.Top | AnchorStyles.Right, Size = new(200, 160), Margin = Padding.Empty, AccessibleName = "Персонаж Outlook", TabStop = false };
         art.Controls.Add(mascot, 0, 0); art.Controls.Add(BuildComputerInfo(), 0, 1); art.Controls.Add(BuildPowerGroup(), 0, 2); shell.Controls.Add(art, 1, 0);
         FormClosed += (_,_) => { infoCancellation?.Cancel(); infoTips.Dispose(); mascot.Image?.Dispose(); Icon?.Dispose(); };
         FlowLayoutPanel Row(params Control[] controls)

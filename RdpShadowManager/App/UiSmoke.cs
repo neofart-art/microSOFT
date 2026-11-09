@@ -12,15 +12,13 @@ internal static class UiSmoke
         {
             using var form = new MainForm();
             form.MaximumSize = new(10000, 10000);
-            var infoGroup = Descendants(form).OfType<GroupBox>().Single(g => g.Text == "Сведения о ПК");
-            var info = Descendants(infoGroup).OfType<Label>().Single();
-            // Synthetic fixture exercises wrapping; never presented as real remote discovery.
-            info.Text = "Компьютер: TEST-REMOTE-WORKSTATION\nIP: 172.20.10.25 (+2, см. подсказку)\nWindows: Microsoft Windows 11 Pro\nВерсия: 24H2, сборка 26100.1234\nOffice: Microsoft Office ProPlus2019Volume, версия 16.0.10416.20073, 64 бит (Click-to-Run)\nMicrosoft Visio Professional 2021, версия 16.0.14332.21040, 32 бит (MSI)";
+            // Synthetic fixture: never presented as real remote discovery.
+            form.SetInfoSmokeFixture();
             form.Show(); Application.DoEvents();
             var grid = Descendants(form).OfType<DataGridView>().Single();
             var picture = Descendants(form).OfType<PictureBox>().Single();
             var connect = Descendants(form).OfType<Button>().Single(b => b.Text == "Подключиться");
-            if (connect.Width < 200 || connect.Height < 46 || !connect.Font.Bold || connect.FlatAppearance.BorderSize != 2)
+            if (connect.Width < 400 || connect.Height < 46 || !connect.Font.Bold || connect.FlatAppearance.BorderSize != 2)
                 throw new InvalidOperationException("Connect button size/style regression");
             var baseline = grid.Size;
             var baselineClient = form.ClientSize;
@@ -38,10 +36,13 @@ internal static class UiSmoke
             var artBounds = form.RectangleToClient(picture.RectangleToScreen(picture.ClientRectangle));
             var gridBounds = form.RectangleToClient(grid.RectangleToScreen(grid.ClientRectangle));
             Check(!artBounds.IntersectsWith(gridBounds), "Mascot overlaps the table");
-            var infoBounds = form.RectangleToClient(info.RectangleToScreen(info.ClientRectangle));
-            Check(!infoBounds.IntersectsWith(gridBounds), "PC details overlap table");
-            Check(info.Height >= info.GetPreferredSize(new Size(info.Width, 0)).Height, "PC details text clipped vertically");
-            Check(info.Width <= info.Parent!.ClientSize.Width, "PC details text clipped horizontally");
+            foreach (var field in Descendants(form).OfType<TextBox>().Where(t => t.ReadOnly && t.Parent?.Parent?.Parent is GroupBox))
+            {
+                var bounds = form.RectangleToClient(field.RectangleToScreen(field.ClientRectangle));
+                Check(!bounds.IntersectsWith(gridBounds), "PC details overlap table");
+                Check(field.Width >= 120 * scale, "PC detail field is too narrow");
+                Check(field.ReadOnly && field.ShortcutsEnabled && field.WordWrap, "PC fields must support selection/copy and wrapping");
+            }
             foreach (var button in Descendants(form).OfType<Button>().Where(b => b.Visible))
             {
                 var bounds = form.RectangleToClient(button.RectangleToScreen(button.ClientRectangle));
