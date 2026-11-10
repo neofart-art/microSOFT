@@ -10,13 +10,9 @@ internal sealed partial class MainForm
         for (int i = 0; i < 4; i++) rows.RowStyles.Add(new(SizeType.AutoSize));
         void Add(string key, string caption, int column, int row, int span = 1)
         {
-            var card = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 1, RowCount = 2, Margin = new(4, 6, 4, 6) };
-            card.ColumnStyles.Add(new(SizeType.Percent, 100));
-            card.RowStyles.Add(new(SizeType.AutoSize)); card.RowStyles.Add(new(SizeType.AutoSize));
-            var field = new ReadableInfoField { Text = "Не удалось определить", AccessibleName = caption, Margin = new(0, 3, 0, 0) };
-            card.Controls.Add(new Label { Text = caption, AutoSize = true, ForeColor = SystemColors.GrayText, Margin = Padding.Empty }, 0, 0);
-            card.Controls.Add(field, 0, 1); rows.Controls.Add(card, column, row); rows.SetColumnSpan(card, span);
+            var field = new ReadableInfoField { Text = "Не удалось определить", AccessibleName = caption };
+            var card = new InfoValueCard(new Label { Text = caption, ForeColor = SystemColors.GrayText }, field);
+            rows.Controls.Add(card, column, row); rows.SetColumnSpan(card, span);
             hardwareFields[key] = field;
         }
         Add("boot", "Последняя загрузка", 0, 0); Add("uptime", "Время работы", 1, 0);

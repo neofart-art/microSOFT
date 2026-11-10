@@ -106,7 +106,7 @@ internal static class UiSmoke
                 throw new InvalidOperationException($"Native text clipped: {field.AccessibleName} {field.Text}, last={last}, client={field.ClientSize}, font={field.Font.Height}");
             var card = field.Parent!;
             if (field.Bottom > card.ClientSize.Height)
-                throw new InvalidOperationException($"Field escapes its layout row: {field.Text}");
+                throw new InvalidOperationException($"Field escapes its layout row: {field.Text}; field={field.Bounds}, card={card.Bounds}, parent={card.Parent?.Bounds}");
         }
     }
     private static IEnumerable<Control> Descendants(Control parent)

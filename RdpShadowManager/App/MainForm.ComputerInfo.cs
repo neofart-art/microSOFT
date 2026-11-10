@@ -24,14 +24,7 @@ internal sealed partial class MainForm
         var rows = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 4 };
         rows.ColumnStyles.Add(new(SizeType.Percent, 50)); rows.ColumnStyles.Add(new(SizeType.Percent, 50));
         for (int i = 0; i < 4; i++) rows.RowStyles.Add(new(SizeType.AutoSize));
-        Control Field(Control caption, TextBox value)
-        {
-            var panel = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, RowCount = 2, Margin = new(3, 4, 3, 4) };
-            panel.ColumnStyles.Add(new(SizeType.Percent, 100));
-            panel.RowStyles.Add(new(SizeType.AutoSize)); panel.RowStyles.Add(new(SizeType.AutoSize));
-            panel.Controls.Add(caption, 0, 0); panel.Controls.Add(value, 0, 1);
-            return panel;
-        }
+        Control Field(Control caption, TextBox value) => new InfoValueCard(caption, value);
         var tools = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
         tools.Controls.Add(infoRefresh); tools.Controls.Add(moreSystemInfo);
         rows.Controls.Add(tools, 0, 0); rows.SetColumnSpan(tools, 2);
