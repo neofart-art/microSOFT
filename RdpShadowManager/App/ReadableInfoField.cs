@@ -17,7 +17,7 @@ internal sealed class ReadableInfoField : TextBox
         var size = TextRenderer.MeasureText(string.IsNullOrEmpty(Text) ? " " : Text, Font,
             new Size(Math.Max(1, width - inset), int.MaxValue),
             TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl | TextFormatFlags.NoPrefix);
-        return Math.Max(Font.Height + inset, size.Height + inset);
+        return Math.Max(MinimumSize.Height, Math.Max(Font.Height + inset, size.Height + inset));
     }
     internal int RequiredHeight() => MeasureHeight(Width);
     public override Size GetPreferredSize(Size proposedSize)
