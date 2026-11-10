@@ -20,7 +20,7 @@ internal sealed class InfoValueCard : Panel
     private int CaptionHeight(int width) => TextRenderer.MeasureText(caption?.Text ?? " ", caption?.Font ?? Font,
         new Size(Math.Max(1, width), int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
     private int ContentHeight(int width) => caption == null || value == null ? 24 :
-        CaptionHeight(width) + Gap + value.GetPreferredSize(new(Math.Max(40, width), 0)).Height;
+        CaptionHeight(width) + Gap + value.GetPreferredSize(new(Math.Max(40, width), 0)).Height + Gap;
     public override Size GetPreferredSize(Size proposedSize)
     {
         int width = proposedSize.Width > 1 && proposedSize.Width < int.MaxValue ? proposedSize.Width : Width;
@@ -39,7 +39,7 @@ internal sealed class InfoValueCard : Panel
             int top = CaptionHeight(width);
             caption.SetBounds(0, 0, width, top);
             value.SetBounds(0, top + Gap, width, value.GetPreferredSize(new(width, 0)).Height);
-            Height = value.Bottom;
+            Height = value.Bottom + Gap;
         }
         finally { arranging = false; }
     }
