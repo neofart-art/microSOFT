@@ -1,0 +1,190 @@
+﻿$ErrorActionPreference='Stop'
+Set-StrictMode -Version Latest
+$sourcePath=Join-Path $PSScriptRoot '../App/Maintenance/RemoteMaintenance.ps1'
+$source=[IO.File]::ReadAllText((Resolve-Path $sourcePath),[Text.Encoding]::UTF8)
+$tokens=$null; $errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
+if ($errors.Count -gt 0) { throw ($errors | Out-String) }
+$count=0
+function Assert($value,[string]$message) { if (-not $value) { throw $message }; $script:count++ }
+# A direct invocation must stop before any registry or process access.
+$guard=& ([ScriptBlock]::Create($source)) '{"Action":"Inspect"}' | ConvertFrom-Json
+Assert ($guard.Code -ne 0 -and $guard.Message -match 'WinRM') 'Local invocation must fail closed'
+foreach ($name in @('New-Plan','Read-Value','Write-Value','Same-Value','Save-Backup','Restore-Conflict','Resolve-OutlookVersions','Assert-AutomaticVersions','Normalize-IPv4','Find-RdpIPv4','Get-SystemInformation','Get-RequestPolicy','Get-AdapterValue','Select-LanIPv4')) {
+    $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
+    if (-not $node) { throw "Missing function: $name" }
+    . ([ScriptBlock]::Create($node.Extent.Text))
+}
+# Pure detection fixtures: no installed Office or real Outlook registry is needed.
+$office2019=Resolve-OutlookVersions @(@{Path='C:\Office16\OUTLOOK.EXE';RegistryBranch='16.0';FileVersion='16.0.19127.20860'}) @()
+Assert ($office2019.Error -eq '' -and ($office2019.Versions -join ',') -eq '16.0') 'Office 2019 build maps to branch 16.0'
+$office2013=Resolve-OutlookVersions @(@{Path='C:\Office15\OUTLOOK.EXE';RegistryBranch='15.0';FileVersion='15.0.5579.1000'}) @()
+Assert ($office2013.Error -eq '' -and ($office2013.Versions -join ',') -eq '15.0') 'Outlook 2013 maps to branch 15.0'
+$both=Resolve-OutlookVersions @(@{Path='a';RegistryBranch='15.0';FileVersion='15.0.1.0'},@{Path='b';RegistryBranch='16.0';FileVersion='16.0.1.0'}) @()
+Assert (($both.Versions -join ',') -eq '15.0,16.0') 'Two independently confirmed versions keep both branches'
+$wrong=Resolve-OutlookVersions @(@{Path='a';RegistryBranch='15.0';FileVersion='16.0.1.0'}) @()
+Assert ($wrong.Error.Length -gt 0) 'Conflicting file and registration blocks application'
+$missing=Resolve-OutlookVersions @() @()
+Assert ($missing.Error.Length -gt 0) 'No classic Outlook is not an invitation to write all versions'
+$unknown=Resolve-OutlookVersions @(@{Path='a';RegistryBranch='16.0';FileVersion='unknown'}) @()
+Assert ($unknown.Error.Length -gt 0) 'Unknown executable version is rejected'
+$unreadable=Resolve-OutlookVersions @(@{Path='a';RegistryBranch='16.0';FileVersion='16.0.1.0'}) @('access denied')
+Assert ($unreadable.Error -match 'access denied') 'Incomplete discovery blocks blind repair'
+Assert ((@(Assert-AutomaticVersions $office2019 @('16.0')) -join ',') -eq '16.0') 'Apply uses detected branch'
+try { Assert-AutomaticVersions $office2019 @('15.0'); throw 'Changed versions accepted' } catch { Assert ($_.Exception.Message -ne 'Changed versions accepted') 'Installation change after confirmation is rejected' }
+try { Assert-AutomaticVersions $missing @(); throw 'Absent Outlook accepted' } catch { Assert ($_.Exception.Message -ne 'Absent Outlook accepted') 'No writes when automatic discovery fails' }
+# Detection and branch validation must precede backup creation / mutation.
+Assert ($source.IndexOf('$versions=@(Assert-AutomaticVersions') -lt $source.IndexOf('$entries=@()')) 'Automatic validation precedes registry mutation planning'
+$sockets=@(
+ @{LocalAddress='172.31.1.11';RemoteAddress='172.31.1.99';LocalPort=3389;State='Established'},
+ @{LocalAddress='26.209.222.170';RemoteAddress='26.0.0.9';LocalPort=3389;State='Established'},
+ @{LocalAddress='26.209.222.170';RemoteAddress='172.31.1.99';LocalPort=443;State='Established'}
+)
+Assert ((@(Find-RdpIPv4 $sockets @('172.31.1.99')) -join ',') -eq '172.31.1.11') 'Current client RDP connection selects 172.31.1.11, not unrelated 26 address'
+Assert (@(Find-RdpIPv4 $sockets @('192.0.2.99')).Count -eq 0) 'Other users connections cannot determine current endpoint'
+Assert (@(Find-RdpIPv4 @(@{LocalAddress='172.31.1.11';RemoteAddress='172.31.1.99';LocalPort=3389;State='Listen'}) @('172.31.1.99')).Count -eq 0) 'Listening socket is not connected'
+Assert ((Normalize-IPv4 '::ffff:172.31.1.11') -eq '172.31.1.11') 'IPv4 mapped server socket is normalized to IPv4'
+Assert ((Normalize-IPv4 '2001:db8::1') -eq '') 'Native IPv6 is not displayed'
+Assert (@(Find-RdpIPv4 @($sockets[0],@{LocalAddress='172.31.1.12';RemoteAddress='172.31.1.99';LocalPort=3389;State='Established'}) @('172.31.1.99')).Count -eq 2) 'Multiple endpoints are kept ambiguous, not guessed'
+# Read-only inventory collector with deterministic fake providers; no real hardware/registry changes.
+function Read-SystemCim([string]$class,[string[]]$properties,[string]$namespace='root/cimv2') {
+    switch ($class) {
+        'Win32_ComputerSystem' { return @(@{Manufacturer='Test';Model='Synthetic PC';TotalPhysicalMemory=17179869184}) }
+        'Win32_OperatingSystem' { return @(@{Caption='Windows test';LastBootUpTime=[datetime]::UtcNow.AddDays(-1);TotalVisibleMemorySize=16777216;FreePhysicalMemory=8388608}) }
+        'Win32_BIOS' { return @(@{SerialNumber='TEST-SERIAL'}) }
+        'Win32_Processor' { return @(@{Name='Test CPU';NumberOfCores=4;NumberOfLogicalProcessors=8;LoadPercentage=25}) }
+        'Win32_LogicalDisk' { return @(@{DeviceID='C:';DriveType=3;FileSystem='NTFS';Size=107374182400;FreeSpace=53687091200},@{DeviceID='Z:';DriveType=4;FileSystem='NTFS';Size=1;FreeSpace=1}) }
+        'Win32_QuickFixEngineering' { return @(@{HotFixID='KB-TEST';Description='Test';InstalledOn='2026-11-08'}) }
+        default { throw "Unexpected CIM query: $class" }
+    }
+}
+function Get-PhysicalDisk { return @(@{FriendlyName='Test SSD';HealthStatus='Healthy';OperationalStatus=@('OK');Size=107374182400}) }
+function Read-RestartIndicators { return @{Pending=$true;Reasons=@('Windows Update test marker')} }
+$watch=[Diagnostics.Stopwatch]::StartNew()
+$inventory=Get-SystemInformation
+Assert ($inventory.Sections.Count -eq 6 -and @($inventory.Sections.Values | Where-Object {$_ -ne 'ok'}).Count -eq 0) 'All requested inventory sections collected'
+Assert ($inventory.Model -eq 'Synthetic PC' -and $inventory.SerialNumber -eq 'TEST-SERIAL') 'Model and serial preserved'
+Assert ($inventory.UptimeSeconds -ge 86300 -and $inventory.LastBoot -match 'Z$') 'Boot and uptime based on remote OS'
+Assert ($inventory.InstalledRamBytes -eq 17179869184 -and $inventory.FreeRamBytes -eq 8589934592) 'Memory units converted from KiB'
+Assert ($inventory.Cpus[0].LoadPercent -eq 25 -and $inventory.Cpus[0].LogicalProcessors -eq 8) 'CPU topology and load'
+Assert ($inventory.Volumes.Count -eq 1 -and $inventory.Volumes[0].Drive -eq 'C:') 'Network shares are not inventoried as local disks'
+Assert ($inventory.PhysicalDisks[0].Health -eq 'Healthy') 'Storage health read'
+Assert ($inventory.Updates[0].Id -eq 'KB-TEST' -and $inventory.RebootPending) 'Recent QFE update and pending restart'
+Assert ($source -notmatch '(?i)BitLocker|Win32_EncryptableVolume|Invoke-CimMethod') 'BitLocker and all its requests are completely removed'
+function Get-PhysicalDisk { throw 'Storage access denied (fixture)' }
+$partial=Get-SystemInformation
+Assert ($partial.Sections.physical -eq 'error' -and $partial.Model -eq 'Synthetic PC' -and $partial.Updates.Count -eq 1) 'Unavailable storage does not discard other sections'
+Assert (($partial.SectionErrors.physical -join ' ') -match 'access denied') 'Partial cause retained'
+function Read-RestartIndicators { throw 'Registry access denied (fixture)' }
+$unknown=Get-SystemInformation
+Assert ($null -eq $unknown.RebootPending -and $unknown.Sections.restart -eq 'error') 'Unknown restart state is not false'
+Remove-Item Function:\Read-SystemCim,Function:\Get-PhysicalDisk,Function:\Read-RestartIndicators
+# Adapter fixture mirrors the user's screenshot. Radmin can falsely report PhysicalAdapter=true.
+$adapters=@(
+ @{InterfaceIndex=1;IPAddress=@('26.209.222.170');DefaultIPGateway=@('26.0.0.1');IPConnectionMetric=1},
+ @{InterfaceIndex=2;IPAddress=@('172.31.1.11');DefaultIPGateway=@('fe80::1','172.31.0.181');IPConnectionMetric=20}
+)
+$metadata=@(
+ @{InterfaceIndex=1;Name='Radmin VPN';Description='Radmin VPN';NetConnectionID='Radmin VPN';ServiceName='Radmin';PNPDeviceID='ROOT\RADMIN';PhysicalAdapter=$true},
+ @{InterfaceIndex=2;Name='Intel Ethernet';Description='Intel Ethernet';NetConnectionID='Ethernet';ServiceName='e1d';PNPDeviceID='PCI\VEN_8086';PhysicalAdapter=$true}
+)
+Assert ((Select-LanIPv4 $adapters $metadata).Address -eq '172.31.1.11') 'LAN fallback rejects Radmin even with lower metric and PhysicalAdapter=true'
+Assert ((Select-LanIPv4 @($adapters[0]) @($metadata[0])).Address -eq '') 'VPN-only interface is not guessed as main LAN'
+$duplicate=@{InterfaceIndex=3;IPAddress=@('172.31.2.11');DefaultIPGateway=@('172.31.2.1');IPConnectionMetric=20}
+$duplicateMeta=@{InterfaceIndex=3;Name='Intel Ethernet 2';Description='Intel';NetConnectionID='Ethernet 2';ServiceName='e1d';PNPDeviceID='PCI\VEN_8086';PhysicalAdapter=$true}
+Assert ((Select-LanIPv4 @($adapters[1],$duplicate) @($metadata[1],$duplicateMeta)).Address -eq '') 'Equal LAN choices remain ambiguous'
+# Exercise the FULL helper entry point, replacing external providers in test-only script text.
+$stubs=@{
+ 'Assert-RemotingContext'='function Assert-RemotingContext {}'
+ 'Get-RemoteMachineIdentity'='function Get-RemoteMachineIdentity([string]$localMachineId) { return "REMOTE-GUID" }'
+ 'Get-SystemInformation'='function Get-SystemInformation { return @{Sections=@{computer="ok"};SectionErrors=@{};Model="ENTRY-TEST"} }'
+ 'Get-ComputerInformation'='function Get-ComputerInformation { $result.Windows="ENTRY-TEST"; $result.PrimaryIPv4="172.31.1.11"; $result.Addresses=@("172.31.1.11"); $result.Code=0; $result.Completed=$true; ConvertTo-Json -InputObject $result -Depth 18 -Compress }'
+ 'Read-RdpConnection'='function Read-RdpConnection { $result.RdpIPv4="172.31.1.11"; return @("172.31.1.11") }'
+}
+$entry=$source
+$nodes=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $stubs.ContainsKey($n.Name)},$true) | Sort-Object {$_.Extent.StartOffset} -Descending)
+Assert ($nodes.Count -eq $stubs.Count) 'Test stubs cover only explicit external provider boundaries'
+foreach ($node in $nodes) { $entry=$entry.Substring(0,$node.Extent.StartOffset)+$stubs[$node.Name]+$entry.Substring($node.Extent.EndOffset) }
+foreach ($action in @('SystemInfo','ComputerInfo','ConnectionInfo')) {
+ $request=@{Action=$action;Computer='TEST-PC';LocalMachineId='LOCAL-GUID';SessionId=0;User='';Domain='';Sid='';MachineId='';Versions=@();CloseOutlook=$false;BackupId='';OperationId='';ClientIPv4=@('172.31.1.99')}
+ $reply=& ([scriptblock]::Create($entry)) (ConvertTo-Json -InputObject $request -Compress) | ConvertFrom-Json
+ Assert ($reply.Code -eq 0 -and $reply.Completed) "$action entry accepts SessionId=0 and no prior pinned MachineId"
+ if ($action -eq 'SystemInfo') { Assert ($reply.SystemInfo.Model -eq 'ENTRY-TEST') 'SystemInfo reaches its collector through real dispatcher' }
+}
+foreach ($action in @('Inspect','Apply','RestorePreview','Restore')) {
+ $request=@{Action=$action;Computer='TEST-PC';LocalMachineId='LOCAL-GUID';SessionId=0;User='';Domain='';Sid='';MachineId='';Versions=@();CloseOutlook=$false;BackupId='';OperationId='';ClientIPv4=@()}
+ $reply=& ([scriptblock]::Create($entry)) (ConvertTo-Json -InputObject $request -Compress) | ConvertFrom-Json
+ Assert ($reply.Code -ne 0 -and $reply.Message -match 'ID') "$action still rejects missing user session"
+}
+$request.Action='Apply';$request.SessionId=1;$request.MachineId='WRONG-GUID'
+$reply=& ([scriptblock]::Create($entry)) (ConvertTo-Json -InputObject $request -Compress) | ConvertFrom-Json
+Assert ($reply.Code -ne 0 -and $reply.Message -match 'идентичность') 'Mutation still checks pinned machine identity before native calls'
+$request.Action='Unknown'
+$reply=& ([scriptblock]::Create($entry)) (ConvertTo-Json -InputObject $request -Compress) | ConvertFrom-Json
+Assert ($reply.Code -ne 0 -and $reply.Message -match 'Неизвестная') 'Unknown action rejected by real dispatcher'
+$native=$ast.Find({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Type'},$true)
+. ([ScriptBlock]::Create($native.Extent.Text))
+Assert ($null -ne ('RsmNative' -as [type])) 'Native WTS and token-check code compiles'
+$result=@{ Sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
+$plan=@(New-Plan @('16.0'))
+Assert ($plan.Count -eq 36) 'Expected 36 logical values per Office version (both views, both hives)'
+foreach ($entry in $plan) {
+    Assert ($entry.Hive -in @('Users','LocalMachine')) 'Never target HKCU'
+    Assert ($entry.View -in @('Registry32','Registry64')) 'Explicit registry view'
+    if ($entry.Hive -eq 'Users') { Assert ($entry.Path.StartsWith($result.Sid+'\')) 'HKU must be SID scoped' }
+    if ($entry.Path -notmatch '\\Policies\\') { Assert ($entry.Name -eq 'excludeexplicito365endpoint') 'Only one non-policy value' }
+}
+$bat=[IO.File]::ReadAllText((Join-Path $PSScriptRoot '../Reference/Outlook repeirNE.bat'),[Text.Encoding]::UTF8)
+$params=([regex]::Match($bat,'set "PARAMS=([^"]+)"').Groups[1].Value -split ' ' | Sort-Object)
+$policy=@($plan | Where-Object { $_.Path -match '\\Policies\\' } | ForEach-Object { $_.Name } | Select-Object -Unique | Sort-Object)
+Assert (($params -join ',') -ceq ($policy -join ',')) 'Policy names must exactly match supplied BAT'
+# Only this test uses a disposable HKCU scratch key. Production entry points reject local execution.
+$scratch='Software\RdpShadowManager-Tests-'+[guid]::NewGuid().ToString()
+$temp=Join-Path ([IO.Path]::GetTempPath()) ('RsmBackupTest-'+[guid]::NewGuid().ToString()+'.json')
+try {
+    $entry=@{ Hive='CurrentUser'; View='Registry64'; Path=$scratch; Name='value' }
+    $absent=Read-Value $entry
+    Assert (-not $absent.Exists) 'Absent snapshot'
+    $fixtures=@(
+        @{ Exists=$true; Kind='String'; Data='original text' },
+        @{ Exists=$true; Kind='ExpandString'; Data='%USERPROFILE%\Outlook' },
+        @{ Exists=$true; Kind='MultiString'; Data=@('one','','three') },
+        @{ Exists=$true; Kind='DWord'; Data='-1' },
+        @{ Exists=$true; Kind='QWord'; Data='9223372036854775807' },
+        @{ Exists=$true; Kind='Binary'; Data=[Convert]::ToBase64String([byte[]]@(0,1,128,255)) },
+        @{ Exists=$true; Kind='None'; Data=[Convert]::ToBase64String([byte[]]@(0,255)) }
+    )
+    foreach ($original in $fixtures) {
+        Write-Value $entry $original
+        $snapshot=Read-Value $entry
+        Assert (Same-Value $snapshot $original) "Read original type $($original.Kind)"
+        $backup=@{ Entries=@(@{Target=$entry; Before=$snapshot}); Time=[DateTimeOffset]::Now.ToString('O') }
+        Save-Backup $backup $temp
+        $persisted=Get-Content -LiteralPath $temp -Raw | ConvertFrom-Json
+        Write-Value $entry @{ Exists=$true; Kind='DWord'; Data='1' }
+        Assert (-not (Same-Value (Read-Value $entry) $snapshot)) 'Applied value differs from original'
+        Write-Value $entry $persisted.Entries[0].Before
+        Assert (Same-Value (Read-Value $entry) $original) "Exact restore $($original.Kind)"
+    }
+    $before=@{Exists=$true;Kind='String';Data='before'}
+    $expected=@{Exists=$true;Kind='DWord';Data='1'}
+    $restoreEntry=@{State='Verified';Before=$before;Expected=$expected}
+    Assert (-not (Restore-Conflict $restoreEntry $expected)) 'Program value can be restored'
+    Assert (-not (Restore-Conflict $restoreEntry $before)) 'Already original value has no conflict'
+    Assert (Restore-Conflict $restoreEntry @{Exists=$true;Kind='DWord';Data='2'}) 'Third-party change blocks restore'
+    $restoreEntry.State='Restored'
+    Assert (Restore-Conflict $restoreEntry $expected) 'Repeated edits after restore are conflicts'
+    $restoreEntry.State='Pending'
+    Assert (-not (Restore-Conflict $restoreEntry $expected)) 'Unattempted values are left alone'
+    Write-Value $entry $absent
+    Assert (-not (Read-Value $entry).Exists) 'Originally absent value is deleted'
+    $k=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($scratch)
+    try { Assert ($null -ne $k) 'Restore must not delete registry keys' } finally { if ($k) { $k.Dispose() } }
+    Assert (-not (Same-Value @{Exists=$true;Kind='DWord';Data='2'} @{Exists=$true;Kind='DWord';Data='1'})) 'Changed value is a conflict'
+} finally {
+    [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($scratch,$false)
+    Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath "$temp.tmp" -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath "$temp.previous" -Force -ErrorAction SilentlyContinue
+}
+Write-Host "PASS: $count maintenance checks"
