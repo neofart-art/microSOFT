@@ -5,16 +5,24 @@ internal sealed partial class MainForm
     private Control BuildHardwareSummary()
     {
         var group = new GroupBox { Text = "Компьютер и время работы", Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new(6) };
-        var rows = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2 };
-        rows.ColumnStyles.Add(new(SizeType.Absolute, 145)); rows.ColumnStyles.Add(new(SizeType.Percent, 100));
-        foreach (var (key, caption, height) in new[] { ("boot","Загрузка Windows",32),("uptime","Время работы",24),("model","Модель ПК",32),("serial","Серийный номер",24),("cpu","CPU",44),("ram","ОЗУ",24) })
+        var rows = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 4 };
+        rows.ColumnStyles.Add(new(SizeType.Percent, 50)); rows.ColumnStyles.Add(new(SizeType.Percent, 50));
+        for (int i = 0; i < 4; i++) rows.RowStyles.Add(new(SizeType.AutoSize));
+        void Add(string key, string caption, int column, int row, int span = 1)
         {
-            int row = rows.RowCount++;
-            var field = new ReadableInfoField { Text = "Не удалось определить" };
-            rows.RowStyles.Add(new(SizeType.AutoSize));
-            rows.Controls.Add(new Label { Text = caption, AutoSize = true, Dock = DockStyle.Fill }, 0, row);
-            rows.Controls.Add(field, 1, row); hardwareFields[key] = field;
+            var card = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1, RowCount = 2, Margin = new(4, 6, 4, 6) };
+            card.ColumnStyles.Add(new(SizeType.Percent, 100));
+            card.RowStyles.Add(new(SizeType.AutoSize)); card.RowStyles.Add(new(SizeType.AutoSize));
+            var field = new ReadableInfoField { Text = "Не удалось определить", AccessibleName = caption, Margin = new(0, 3, 0, 0) };
+            card.Controls.Add(new Label { Text = caption, AutoSize = true, ForeColor = SystemColors.GrayText, Margin = Padding.Empty }, 0, 0);
+            card.Controls.Add(field, 0, 1); rows.Controls.Add(card, column, row); rows.SetColumnSpan(card, span);
+            hardwareFields[key] = field;
         }
+        Add("boot", "Последняя загрузка", 0, 0); Add("uptime", "Время работы", 1, 0);
+        Add("model", "Модель компьютера", 0, 1, 2);
+        Add("serial", "Серийный номер", 0, 2); Add("ram", "Оперативная память", 1, 2);
+        Add("cpu", "Процессор", 0, 3, 2);
         group.Controls.Add(rows); return group;
     }
     private void ShowHardwareSummary(SystemInfoData? data)

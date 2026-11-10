@@ -39,17 +39,16 @@ internal sealed partial class MainForm : Form
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Padding = new(12), Margin = Padding.Empty };
         layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.Percent, 100));
         for (int i=2;i<9;i++) layout.RowStyles.Add(new(SizeType.AutoSize));
-        var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-        shell.ColumnStyles.Add(new(SizeType.Percent, 100)); shell.ColumnStyles.Add(new(SizeType.Absolute, 500));
-        shell.RowStyles.Add(new(SizeType.Percent, 100));
-        Controls.Add(shell); shell.Controls.Add(layout, 0, 0);
+        var shell = new SplitContainer { Dock = DockStyle.Fill, Size = ClientSize, SplitterWidth = 8,
+            Panel1MinSize = 500, Panel2MinSize = 380, SplitterDistance = 920 };
+        Controls.Add(shell); shell.Panel1.Controls.Add(layout);
         var art = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, AutoScroll = true, Padding = new(12), Margin = Padding.Empty };
         art.ColumnStyles.Add(new(SizeType.Percent, 100));
         art.RowStyles.Add(new(SizeType.Absolute, 160)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.AutoSize)); art.RowStyles.Add(new(SizeType.Percent, 100));
         using var imageStream = typeof(MainForm).Assembly.GetManifestResourceStream("RdpShadowManager.Resources.outlook-mascot.jpg")!;
         using var sourceImage = Image.FromStream(imageStream);
         var mascot = new PictureBox { Image = new Bitmap(sourceImage), SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.None, Anchor = AnchorStyles.Top | AnchorStyles.Right, Size = new(200, 160), Margin = Padding.Empty, AccessibleName = "Персонаж Outlook", TabStop = false };
-        art.Controls.Add(mascot, 0, 0); art.Controls.Add(BuildComputerInfo(), 0, 1); art.Controls.Add(BuildPowerGroup(), 0, 2); art.Controls.Add(BuildHardwareSummary(), 0, 3); shell.Controls.Add(art, 1, 0);
+        art.Controls.Add(mascot, 0, 0); art.Controls.Add(BuildComputerInfo(), 0, 1); art.Controls.Add(BuildPowerGroup(), 0, 2); art.Controls.Add(BuildHardwareSummary(), 0, 3); shell.Panel2.Controls.Add(art);
         FormClosed += (_,_) => { rdpPolling?.Cancel(); infoCancellation?.Cancel(); infoTips.Dispose(); mascot.Image?.Dispose(); Icon?.Dispose(); };
         FlowLayoutPanel Row(params Control[] controls)
         {

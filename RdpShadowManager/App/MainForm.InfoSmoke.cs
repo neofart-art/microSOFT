@@ -7,8 +7,8 @@ internal sealed partial class MainForm
         "IPv4: 172.20.10.25",
         "Майкрософт Windows 11 Pro\r\n24H2, сборка 26100.1234",
         "Microsoft Office HomeBusinessRetail, версия 16.0.19127.20860, 64 бит (Click-to-Run)\r\nMicrosoft Visio Professional 2021, версия 16.0.14332.21040, 32 бит (MSI)");
-        ShowHardwareSummary(new SystemInfoData { Model = "TEST Laptop", SerialNumber = "TEST-SERIAL", LastBoot = "2026-11-08T10:00:00Z",
-            UptimeSeconds = 86400, InstalledRamBytes = 17179869184, Cpus = [new() { Name = "TEST CPU" }] });
+        ShowHardwareSummary(new SystemInfoData { Model = "HP ProDesk 600 G6 — расширенное название модели", SerialNumber = "8CC1343GD9", LastBoot = "2026-11-08T10:00:00Z",
+            UptimeSeconds = 86400, InstalledRamBytes = 17179869184, Cpus = [new() { Name = "Intel(R) Core(TM) i7-10700T CPU @ 2.00GHz — 8 ядер, 16 логических процессоров" }] });
     }
     internal static async Task CheckComputerInfoStates()
     {

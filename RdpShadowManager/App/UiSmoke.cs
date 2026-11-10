@@ -47,6 +47,14 @@ internal static class UiSmoke
                 Check(field.ReadOnly && field.ShortcutsEnabled && field.WordWrap, "PC fields must support selection/copy and wrapping");
                 if (field is ReadableInfoField readable) Check(field.ScrollBars == ScrollBars.None && field.Height >= readable.RequiredHeight(), "Full PC value must fit without internal scrolling");
             }
+            CheckVisibleValues(form);
+            var divider = Descendants(form).OfType<SplitContainer>().Single();
+            int savedDivider = divider.SplitterDistance;
+            divider.SplitterDistance = Math.Min(divider.Width - divider.Panel2MinSize - divider.SplitterWidth, savedDivider + (int)(60 * scale));
+            form.SetInfoSmokeFixture(); form.PerformLayout(); Application.DoEvents();
+            CheckVisibleValues(form);
+            divider.SplitterDistance = savedDivider;
+            form.PerformLayout(); Application.DoEvents();
             foreach (var button in Descendants(form).OfType<Button>().Where(b => b.Visible))
             {
                 var bounds = form.RectangleToClient(button.RectangleToScreen(button.ClientRectangle));
@@ -85,6 +93,21 @@ internal static class UiSmoke
         File.WriteAllText(Path.Combine(output, "local-target-rejected.json"), transport.Result.Report());
         checks.Add("PASS: PowerShell transport returns structured nonzero result for local target / unavailable WinRM; no local fallback");
         File.WriteAllLines(Path.Combine(output, "checks.txt"), checks);
+    }
+    private static void CheckVisibleValues(Control parent)
+    {
+        foreach (var field in Descendants(parent).OfType<ReadableInfoField>())
+        {
+            field.Select(0, 0); field.ScrollToCaret();
+            // Actual native edit positions, independent of the preferred-size calculation.
+            var first = field.GetPositionFromCharIndex(0);
+            var last = field.GetPositionFromCharIndex(Math.Max(0, field.TextLength - 1));
+            if (first.Y < 0 || last.Y + field.Font.Height > field.ClientSize.Height)
+                throw new InvalidOperationException($"Native text clipped: {field.AccessibleName} {field.Text}, last={last}, client={field.ClientSize}, font={field.Font.Height}");
+            var card = field.Parent!;
+            if (field.Bottom > card.ClientSize.Height)
+                throw new InvalidOperationException($"Field escapes its layout row: {field.Text}");
+        }
     }
     private static IEnumerable<Control> Descendants(Control parent)
     {
